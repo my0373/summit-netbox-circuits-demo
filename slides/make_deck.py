@@ -219,7 +219,7 @@ steps = [
     ("4", "AAP Controller",  "Queries NetBox for backup circuit (IPLC-GB-PH-SEC), simulates router config push, updates NetBox"),
     ("5", "Visual Explorer", "Refresh map — failed circuit line is gone, backup confirmed active"),
     ("6", "Report",          "Open the failover report: sites, routers, timeline, ROI comparison"),
-    ("7", "MCP Server",      "Ask Claude Code via NetBox MCP: 'What is the status of IPLC-GB-PH-PRI?' — confirms live"),
+    ("7", "Claude + MCP",    "Ask Claude: \"What is the status of IPLC-GB-PH-PRI?\" — live NetBox data confirms the failover"),
 ]
 
 y = Inches(1.1)
@@ -362,6 +362,68 @@ bullet_slide(s, "Resetting the Demo", [
     "Can also run individual circuits: IPLC-GB-JP-PRI, IPLC-GB-RO-PRI, etc.",
     "The demo is fully repeatable — no manual cleanup needed",
 ])
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Slide 12 — MCP: Confirm with Claude (final demo step)
+# ═══════════════════════════════════════════════════════════════════════════════
+s = new_slide()
+accent_bar(s)
+txb(s, "Step 7: Confirm with Claude + NetBox MCP",
+    Inches(0.5), Inches(0.25), Inches(12), Inches(0.7),
+    size=32, bold=True, color=TEAL)
+
+# Left panel — what it is
+rect(s, Inches(0.3), Inches(1.05), Inches(4.5), Inches(5.9), fill=CARD, line=TEAL)
+txb(s, "What is the NetBox MCP Server?",
+    Inches(0.5), Inches(1.2), Inches(4.1), Inches(0.5),
+    size=16, bold=True, color=TEAL)
+
+mcp_bullets = [
+    "Runs on a dedicated AWS VM",
+    "Connected to your NetBox Cloud instance",
+    "Read-only — queries only, no writes",
+    "Accessed via SSH stdio transport",
+    "Registered once with Claude Code:\nclaude mcp add netbox-mcp ...",
+    "Claude calls NetBox API tools\nautomatically behind the scenes",
+]
+by = Inches(1.8)
+for b in mcp_bullets:
+    txb(s, "•  " + b, Inches(0.5), by, Inches(4.1), Inches(0.65),
+        size=14, color=WHITE)
+    by += Inches(0.62)
+
+# Right panel — example queries
+rect(s, Inches(5.1), Inches(1.05), Inches(7.9), Inches(5.9), fill=CARD, line=GREY)
+txb(s, "Example queries at the end of the demo",
+    Inches(5.3), Inches(1.2), Inches(7.5), Inches(0.5),
+    size=16, bold=True, color=GREY)
+
+queries = [
+    ("What is the current status of IPLC-GB-PH-PRI?",
+     "Confirms: Deprovisioning — failed circuit is recorded"),
+    ("What is the status of IPLC-GB-PH-SEC?",
+     "Confirms: Active — backup is live"),
+    ("Show me all active circuits between GB-Bristol and PH-Manila-01.",
+     "Lists surviving circuits on that route"),
+    ("Which circuits are currently not active?",
+     "Full view of any degraded paths across the WAN"),
+    ("When was IPLC-GB-PH-PRI last changed, and by whom?",
+     "Audit trail: timestamp + username from NetBox change log"),
+]
+
+qy = Inches(1.85)
+for q, ans in queries:
+    # Query bubble
+    qbox = rect(s, Inches(5.2), qy, Inches(7.6), Inches(0.42), fill=RGBColor(0x0D, 0x2E, 0x4A), line=TEAL)
+    txb(s, "❯  " + q, Inches(5.35), qy + Inches(0.04), Inches(7.3), Inches(0.38),
+        size=13, bold=True, color=TEAL)
+    qy += Inches(0.46)
+    txb(s, "    " + ans, Inches(5.35), qy, Inches(7.3), Inches(0.38),
+        size=13, color=GREY, italic=True)
+    qy += Inches(0.6)
+
+add_logo(s)
 
 
 # ── Save ───────────────────────────────────────────────────────────────────────
