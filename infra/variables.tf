@@ -31,12 +31,12 @@ variable "key_name" {
 variable "netbox_url" {
   description = "NetBox instance URL for the MCP server"
   type        = string
-  default     = "https://ryvr4514.cloud.netboxapp.com"
+  # Passed in by setup_infra.sh from .env — no default to avoid committing instance URLs
 }
 
 variable "netbox_token" {
   description = "NetBox API token for the MCP server (read-only)"
   type        = string
   sensitive   = true
-  default     = ""
+  # Passed in by setup_infra.sh from .env — never hardcode here
 }

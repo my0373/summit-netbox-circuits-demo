@@ -34,14 +34,21 @@ import argparse
 import requests
 from urllib.parse import urljoin
 
-# ── Configuration ──────────────────────────────────────────────────────────────
+# ── Configuration (all values loaded from environment — see .env) ──────────────
 
-AAP_HOST    = os.getenv("AAP_URL", "https://netbox-aap25.demoredhat.com")
-AAP_USER    = os.getenv("AAP_USERNAME", "mattyork")
-AAP_PASS    = os.getenv("AAP_PASSWORD", "Yw5Z9Him2RDdw7j")
+def _require(name):
+    val = os.getenv(name)
+    if not val:
+        print(f"ERROR: environment variable {name} is not set. Source your .env file first.")
+        sys.exit(1)
+    return val
 
-NETBOX_URL   = os.getenv("NETBOX_URL", "https://ryvr4514.cloud.netboxapp.com")
-NETBOX_TOKEN = os.getenv("NETBOX_TOKEN", "jdjA3gzQxPtHjuFxNz0IUR7qMaLNJtcAMwic9BDf")
+AAP_HOST    = _require("AAP_URL")
+AAP_USER    = _require("AAP_USERNAME")
+AAP_PASS    = _require("AAP_PASSWORD")
+
+NETBOX_URL   = _require("NETBOX_URL")
+NETBOX_TOKEN = _require("NETBOX_TOKEN")
 
 GITHUB_REPO  = "https://github.com/my0373/summit-netbox-circuits-demo"
 GITHUB_BRANCH = "main"
@@ -59,8 +66,8 @@ EDA_TOKEN_STREAM_TYPE_ID = 8  # Token Event Stream
 # Decision environment image
 DE_IMAGE = "quay.io/ansible/eda-decision-env:latest"
 
-# Event stream webhook token (shared secret between EDA and NetBox)
-EVENT_STREAM_TOKEN = "netbox-summit-demo-2026"
+# Event stream webhook token — set in .env as EDA_STREAM_TOKEN
+EVENT_STREAM_TOKEN = _require("EDA_STREAM_TOKEN")
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 

@@ -1,0 +1,25 @@
+sequenceDiagram
+    actor Presenter
+    participant Copilot as NetBox Copilot
+    participant NB as NetBox Cloud
+    participant EDA as EDA Event Stream
+    participant AAP as AAP Controller
+    participant VE as Visual Explorer
+    participant RS as Report Server
+
+    Presenter->>Copilot: "IPLC-GB-PH-PRI has failed —\nset it to deprovisioning"
+    Copilot->>NB: PATCH /circuits/circuits/{id}/\nstatus → deprovisioning
+    NB-->>Copilot: 200 OK
+    NB->>EDA: Webhook POST\n{model: circuit, cid: IPLC-GB-PH-PRI,\nstatus: deprovisioning}
+    EDA->>AAP: run_job_template\nfailed_circuit=IPLC-GB-PH-PRI
+    Note over AAP: Query NetBox for backup circuit
+    AAP->>NB: GET circuits between GB-Bristol ↔ PH-Manila-01
+    NB-->>AAP: IPLC-GB-PH-SEC (Meridian, 1 Gbps)
+    Note over AAP: Simulate router config push
+    AAP->>NB: PATCH IPLC-GB-PH-PRI → deprovisioning
+    AAP->>NB: PATCH IPLC-GB-PH-SEC → active
+    AAP->>RS: Upload failover_report.html
+    NB->>VE: Live map update\n(failed circuit removed)
+    Presenter->>VE: "Circuit line is gone from the map"
+    Presenter->>RS: Open report URL
+    Note over RS: Report shows failed/backup,\nrouters, timeline, ROI

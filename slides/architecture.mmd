@@ -1,0 +1,31 @@
+flowchart LR
+    subgraph NB["NetBox Cloud (Source of Truth)"]
+        COP["🤖 Copilot AI"]
+        VE["🗺️ Visual Explorer"]
+        WH["⚡ Webhook"]
+        COP --> WH
+    end
+
+    subgraph EDA["Event-Driven Ansible (EDA)"]
+        ES["📥 Event Stream"]
+        RB["📋 Rulebook"]
+        ES --> RB
+    end
+
+    subgraph CTRL["AAP Controller"]
+        JT["▶️ Circuit Failover\nJob Template"]
+        PB["📜 Playbook"]
+        JT --> PB
+    end
+
+    subgraph OUT["Outputs"]
+        NB2["✅ NetBox Updated\n(circuit status)"]
+        RPT["📄 Failover Report\n(HTTPS)"]
+        MCP["🔍 MCP Server\n(status confirm)"]
+    end
+
+    WH -->|"circuit → deprovisioning"| ES
+    RB -->|"run_job_template"| JT
+    PB -->|"PATCH circuit status"| NB2
+    PB -->|"upload HTML"| RPT
+    NB2 -->|"live update"| VE

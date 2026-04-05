@@ -23,3 +23,7 @@ infra/keys/
 # Generated infra vars (written by setup_infra.sh) — commit infra.yml.example not infra.yml
 ansible/vars/infra.yml
 !ansible/vars/infra.yml.example
+
+# Slides — generated artefacts (rebuild with: uv run --with python-pptx python slides/make_deck.py)
+slides/*.png
+slides/*.pptx
