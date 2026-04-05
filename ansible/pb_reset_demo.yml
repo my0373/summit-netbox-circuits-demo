@@ -4,7 +4,7 @@
 # Resets the demo circuits in NetBox to their starting state:
 #   - IPLC-GB-AT-PRI → active   (the circuit that "fails" in the demo)
 #   - IPLC-GB-AT-SEC → offline  (the backup, brought online by automation)
-#   - All other dd-tagged circuits → offline
+#   - All other dd-tagged circuits → active
 #
 # Usage:
 #   ansible-playbook ansible/pb_reset_demo.yml
@@ -21,14 +21,6 @@
     primary_circuit: "IPLC-GB-AT-PRI"
     offline_circuits:
       - IPLC-GB-AT-SEC
-      - IPLC-GB-PH-PRI
-      - IPLC-GB-PH-SEC
-      - IPLC-GB-PH-DR
-      - MPLS-GB-PH-01
-      - DIA-PH-MNL-01
-      - TRANSIT-PH-MNL-01
-      - IPLC-NI-PH-PRI
-      - IPLC-PH-JP-PRI
 
   tasks:
 
@@ -39,6 +31,33 @@
           Authorization: "Token {{ netbox_token }}"
         return_content: true
       register: all_circuits
+
+    # ── Set all dd-tagged circuits to active ──────────────────────────────────
+
+    - name: Find circuits that are not active
+      ansible.builtin.set_fact:
+        circuits_to_activate: >-
+          {{
+            all_circuits.json.results
+            | rejectattr('status.value', 'eq', 'active')
+            | rejectattr('cid', 'in', offline_circuits)
+            | list
+          }}
+
+    - name: Restore all other circuits to active
+      ansible.builtin.uri:
+        url: "{{ netbox_url }}/api/circuits/circuits/{{ item.id }}/"
+        method: PATCH
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          status: "active"
+        status_code: 200
+      loop: "{{ circuits_to_activate }}"
+      loop_control:
+        label: "{{ item.cid }}"
 
     # ── Set primary circuit active ─────────────────────────────────────────────
 
@@ -106,6 +125,6 @@
       ansible.builtin.debug:
         msg: >-
           Reset complete.
-          {{ primary_circuit }} is Active.
-          {{ circuits_to_offline | length }} circuit(s) set to Offline.
+          {{ primary_circuit }} is Active. IPLC-GB-AT-SEC is Offline.
+          {{ circuits_to_activate | length }} other circuit(s) restored to Active.
           NetBox and Visual Explorer are back to starting state.
