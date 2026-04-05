@@ -241,12 +241,17 @@
         status_code: 200
         validate_certs: false
       register: primary_update
+      when: primary.status.value != 'offline'
 
     - name: Confirm primary circuit updated
       ansible.builtin.debug:
         msg: >-
-          {{ primary.cid }} status updated:
+          {{ primary.cid }}:
+          {% if primary.status.value != 'offline' %}
           {{ primary.status.label }} → {{ primary_update.json.status.label }}
+          {% else %}
+          already offline — no update needed
+          {% endif %}
 
     - name: Set backup circuit to active in NetBox
       ansible.builtin.uri:
@@ -261,12 +266,17 @@
         status_code: 200
         validate_certs: false
       register: backup_update
+      when: backup.status.value != 'active'
 
     - name: Confirm backup circuit active
       ansible.builtin.debug:
         msg: >-
-          {{ backup.cid }} confirmed:
-          {{ backup_update.json.status.label }}
+          {{ backup.cid }}:
+          {% if backup.status.value != 'active' %}
+          {{ backup.status.label }} → {{ backup_update.json.status.label }}
+          {% else %}
+          already active — no update needed
+          {% endif %}
 
     - name: Failover complete
       ansible.builtin.debug:
