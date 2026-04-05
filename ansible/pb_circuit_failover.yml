@@ -247,11 +247,16 @@
       ansible.builtin.debug:
         msg: >-
           {{ primary.cid }}:
-          {% if primary.status.value != 'offline' %}
+          {{ primary.status.label }} → offline
+          (update skipped — already offline)
+      when: primary.status.value == 'offline'
+
+    - name: Confirm primary circuit updated (was changed)
+      ansible.builtin.debug:
+        msg: >-
+          {{ primary.cid }}:
           {{ primary.status.label }} → {{ primary_update.json.status.label }}
-          {% else %}
-          already offline — no update needed
-          {% endif %}
+      when: primary.status.value != 'offline'
 
     - name: Set backup circuit to active in NetBox
       ansible.builtin.uri:
@@ -268,15 +273,18 @@
       register: backup_update
       when: backup.status.value != 'active'
 
-    - name: Confirm backup circuit active
+    - name: Confirm backup circuit active (no change needed)
+      ansible.builtin.debug:
+        msg: >-
+          {{ backup.cid }}: already active — no update needed
+      when: backup.status.value == 'active'
+
+    - name: Confirm backup circuit active (was changed)
       ansible.builtin.debug:
         msg: >-
           {{ backup.cid }}:
-          {% if backup.status.value != 'active' %}
           {{ backup.status.label }} → {{ backup_update.json.status.label }}
-          {% else %}
-          already active — no update needed
-          {% endif %}
+      when: backup.status.value != 'active'
 
     - name: Failover complete
       ansible.builtin.debug:
