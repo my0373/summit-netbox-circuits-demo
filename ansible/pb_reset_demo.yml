@@ -1,0 +1,72 @@
+---
+# pb_reset_demo.yml
+#
+# Resets all demo circuits back to 'active' status in NetBox.
+# Run this between demo runs to restore the starting state.
+#
+# Usage:
+#   ansible-playbook ansible/pb_reset_demo.yml
+
+- name: Reset demo circuits to active
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars_files:
+    - vars/netbox_creds.yml
+
+  tasks:
+
+    - name: Fetch all circuits tagged 'dd'
+      ansible.builtin.uri:
+        url: "{{ netbox_url }}/api/circuits/circuits/?tag=dd&limit=100"
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+        return_content: true
+      register: all_circuits
+
+    - name: Find circuits that are not active (need resetting)
+      ansible.builtin.set_fact:
+        circuits_to_reset: >-
+          {{
+            all_circuits.json.results
+            | rejectattr('status.value', 'eq', 'active')
+            | list
+          }}
+
+    - name: Report what will be reset
+      ansible.builtin.debug:
+        msg: >-
+          Found {{ circuits_to_reset | length }} circuit(s) to reset:
+          {{ circuits_to_reset | map(attribute='cid') | join(', ') | default('none') }}
+
+    - name: Reset circuits to active
+      ansible.builtin.uri:
+        url: "{{ netbox_url }}/api/circuits/circuits/{{ item.id }}/"
+        method: PATCH
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          status: "active"
+        status_code: 200
+      loop: "{{ circuits_to_reset }}"
+      loop_control:
+        label: "{{ item.cid }}"
+      register: reset_results
+
+    - name: Confirm reset
+      ansible.builtin.debug:
+        msg: "{{ item.item.cid }}: {{ item.item.status.label }} → {{ item.json.status.label }}"
+      loop: "{{ reset_results.results }}"
+      loop_control:
+        label: "{{ item.item.cid }}"
+      when: reset_results.results | length > 0
+
+    - name: All done
+      ansible.builtin.debug:
+        msg: >-
+          Demo reset complete.
+          {{ circuits_to_reset | length }} circuit(s) restored to Active.
+          NetBox and Visual Explorer are back to starting state.

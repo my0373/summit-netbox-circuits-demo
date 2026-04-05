@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Circuit Failover Report — {{ primary.cid }}</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0D1B2A; color: #e2e8f0; padding: 2rem; }
+  .container { max-width: 1000px; margin: 0 auto; }
+  .header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 2rem; }
+  .header-text h1 { font-size: 1.6rem; color: #00C2A8; margin-bottom: 0.25rem; }
+  .header-text .subtitle { color: #B0BCCC; font-size: 0.85rem; }
+  .badge-automated { display: inline-block; background: #00C2A820; border: 1px solid #00C2A8; color: #00C2A8; padding: 0.2rem 0.6rem; border-radius: 3px; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; margin-top: 0.5rem; }
+  .card { background: #142A3E; border-radius: 8px; padding: 1.5rem; margin-bottom: 1.5rem; border: 1px solid #1e3a52; }
+  .card h2 { font-size: 1rem; color: #f8fafc; margin-bottom: 1rem; padding-bottom: 0.5rem; border-bottom: 1px solid #1e3a52; text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.8rem; color: #B0BCCC; }
+  .topology { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  .circuit { padding: 1rem; border-radius: 6px; }
+  .circuit.failed { background: #450a0a30; border: 1px solid #ef4444; }
+  .circuit.backup  { background: #00C2A810; border: 1px solid #00C2A8; }
+  .circuit .label  { font-weight: 700; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.5rem; }
+  .circuit.failed .label { color: #ef4444; }
+  .circuit.backup  .label { color: #00C2A8; }
+  .circuit .cid { font-size: 1rem; font-weight: 600; color: #f8fafc; margin-bottom: 0.75rem; }
+  .field { display: flex; justify-content: space-between; padding: 0.25rem 0; font-size: 0.82rem; }
+  .field .key { color: #B0BCCC; }
+  .field .val { color: #e2e8f0; font-weight: 500; }
+  .badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 3px; font-size: 0.72rem; font-weight: 600; text-transform: uppercase; }
+  .badge.active        { background: #052e16; color: #4ade80; }
+  .badge.deprovisioning { background: #450a0a; color: #fca5a5; }
+  .router-list { list-style: none; }
+  .router-list li { padding: 0.5rem 0.75rem; margin-bottom: 0.5rem; background: #0D1B2A; border-radius: 4px; font-size: 0.85rem; display: flex; justify-content: space-between; align-items: center; }
+  .router-list .name { font-weight: 600; color: #00C2A8; }
+  .router-list .site { color: #B0BCCC; font-size: 0.8rem; }
+  .steps { counter-reset: step; }
+  .step { position: relative; padding: 1rem 1rem 1rem 3rem; margin-bottom: 0.75rem; background: #0D1B2A; border-radius: 6px; border-left: 3px solid #1e3a52; }
+  .step::before { counter-increment: step; content: counter(step); position: absolute; left: 0.75rem; top: 1rem; color: #00C2A8; font-weight: 700; font-size: 1rem; }
+  .step.detect  { border-left-color: #ef4444; }
+  .step.discover { border-left-color: #f59e0b; }
+  .step.push    { border-left-color: #8b5cf6; }
+  .step.update  { border-left-color: #00C2A8; }
+  .step h3 { font-size: 0.88rem; color: #f8fafc; margin-bottom: 0.35rem; }
+  .step p  { font-size: 0.82rem; color: #B0BCCC; }
+  .cmd { font-family: 'SF Mono', 'Fira Code', monospace; background: #020c18; color: #4ade80; padding: 0.75rem 1rem; border-radius: 4px; font-size: 0.78rem; margin-top: 0.5rem; white-space: pre; line-height: 1.6; border: 1px solid #1e3a52; }
+  .comparison { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+  .metric { text-align: center; padding: 1.5rem; border-radius: 6px; }
+  .metric.manual { background: #450a0a20; border: 1px solid #ef444440; }
+  .metric.auto   { background: #00C2A810; border: 1px solid #00C2A840; }
+  .metric .number { font-size: 2.5rem; font-weight: 700; }
+  .metric.manual .number { color: #ef4444; }
+  .metric.auto   .number { color: #00C2A8; }
+  .metric .desc { font-size: 0.8rem; color: #B0BCCC; margin-top: 0.35rem; line-height: 1.4; }
+  .candidates { list-style: none; }
+  .candidates li { padding: 0.4rem 0.75rem; margin-bottom: 0.4rem; background: #0D1B2A; border-radius: 4px; font-size: 0.82rem; display: flex; justify-content: space-between; }
+  .candidates .selected { border-left: 3px solid #00C2A8; }
+  .candidates .cid-label { color: #e2e8f0; font-weight: 600; }
+  .candidates .meta { color: #B0BCCC; }
+  .footer { text-align: center; color: #475569; font-size: 0.72rem; margin-top: 2rem; padding-top: 1rem; border-top: 1px solid #1e3a52; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<div class="header">
+  <div class="header-text">
+    <h1>Circuit Failover Report</h1>
+    <p class="subtitle">{{ primary_a_site }} &harr; {{ primary_z_site }} &nbsp;|&nbsp; {{ ansible_date_time.iso8601 }} &nbsp;|&nbsp; Source: NetBox SoT</p>
+    <span class="badge-automated">Fully Automated</span>
+  </div>
+</div>
+
+<!-- Circuit Topology -->
+<div class="card">
+  <h2>Circuit Topology</h2>
+  <div class="topology">
+
+    <div class="circuit failed">
+      <div class="label">Failed Circuit</div>
+      <div class="cid">{{ primary.cid }}</div>
+      <div class="field"><span class="key">Provider</span><span class="val">{{ primary.provider.name }}</span></div>
+      <div class="field"><span class="key">Type</span><span class="val">{{ primary.type.name }}</span></div>
+      <div class="field"><span class="key">Status</span><span class="val"><span class="badge deprovisioning">Deprovisioning</span></span></div>
+      <div class="field"><span class="key">Committed Rate</span><span class="val">{{ primary.commit_rate // 1000 }} Mbps</span></div>
+      <div class="field"><span class="key">A-side</span><span class="val">{{ primary_a_site }}</span></div>
+      <div class="field"><span class="key">Z-side</span><span class="val">{{ primary_z_site }}</span></div>
+{% if primary.custom_fields.monthly_cost %}
+      <div class="field"><span class="key">Monthly Cost</span><span class="val">${{ primary.custom_fields.monthly_cost | int | string | replace(',', '') }}</span></div>
+{% endif %}
+{% if primary.custom_fields.sla_uptime %}
+      <div class="field"><span class="key">SLA</span><span class="val">{{ primary.custom_fields.sla_uptime }}% / {{ primary.custom_fields.sla_mttr_hours }}h MTTR</span></div>
+{% endif %}
+    </div>
+
+    <div class="circuit backup">
+      <div class="label">Active Backup</div>
+      <div class="cid">{{ backup.cid }}</div>
+      <div class="field"><span class="key">Provider</span><span class="val">{{ backup.provider.name }}</span></div>
+      <div class="field"><span class="key">Type</span><span class="val">{{ backup.type.name }}</span></div>
+      <div class="field"><span class="key">Status</span><span class="val"><span class="badge active">Active</span></span></div>
+      <div class="field"><span class="key">Committed Rate</span><span class="val">{{ backup.commit_rate // 1000 }} Mbps</span></div>
+      <div class="field"><span class="key">A-side</span><span class="val">{{ backup_a_site }}</span></div>
+      <div class="field"><span class="key">Z-side</span><span class="val">{{ backup_z_site }}</span></div>
+{% if backup.custom_fields.monthly_cost %}
+      <div class="field"><span class="key">Monthly Cost</span><span class="val">${{ backup.custom_fields.monthly_cost | int | string | replace(',', '') }}</span></div>
+{% endif %}
+{% if backup.custom_fields.sla_uptime %}
+      <div class="field"><span class="key">SLA</span><span class="val">{{ backup.custom_fields.sla_uptime }}% / {{ backup.custom_fields.sla_mttr_hours }}h MTTR</span></div>
+{% endif %}
+    </div>
+  </div>
+</div>
+
+<!-- Backup Selection -->
+<div class="card">
+  <h2>Backup Selection — {{ candidates | length }} Candidate(s) Evaluated</h2>
+  <p style="font-size: 0.82rem; color: #B0BCCC; margin-bottom: 0.75rem;">
+    Backup selected automatically from NetBox — highest commit rate between {{ primary_a_site }} and {{ primary_z_site }}.
+  </p>
+  <ul class="candidates">
+{% for c in candidates | sort(attribute='commit_rate', reverse=true) %}
+    <li class="{{ 'selected' if c.id == backup.id else '' }}">
+      <span class="cid-label">{{ c.cid }}{% if c.id == backup.id %} ✓ selected{% endif %}</span>
+      <span class="meta">{{ c.provider.name }} &mdash; {{ c.commit_rate // 1000 }} Mbps</span>
+    </li>
+{% endfor %}
+  </ul>
+</div>
+
+<!-- Affected Routers -->
+<div class="card">
+  <h2>Affected Routers</h2>
+  <p style="font-size: 0.82rem; color: #B0BCCC; margin-bottom: 0.75rem;">
+    Discovered automatically from circuit terminations in NetBox.
+  </p>
+  <ul class="router-list">
+{% for r in routers %}
+    <li>
+      <span class="name">{{ r.name }}</span>
+      <span class="site">{{ r.site.name }}</span>
+    </li>
+{% endfor %}
+  </ul>
+</div>
+
+<!-- Failover Steps -->
+<div class="card">
+  <h2>Automated Failover Actions</h2>
+  <div class="steps">
+
+    <div class="step detect">
+      <h3>Circuit failure detected</h3>
+      <p>NetBox Copilot set <strong>{{ primary.cid }}</strong> to Deprovisioning.
+         Webhook fired to Ansible Automation Platform.</p>
+    </div>
+
+    <div class="step discover">
+      <h3>Backup path discovered from NetBox SoT</h3>
+      <p>NetBox identified <strong>{{ backup.cid }}</strong> via {{ backup.provider.name }}
+         as the highest-capacity available path between {{ primary_a_site }} and {{ primary_z_site }}.</p>
+    </div>
+
+    <div class="step push">
+      <h3>Router configuration updated</h3>
+      <p>Failover route pushed to <strong>{{ routers[0].name }}</strong> ({{ routers[0].site.name }}):</p>
+      <div class="cmd">conf t
+no ip route 0.0.0.0 0.0.0.0 172.16.0.1   ! remove primary default route
+ip route 0.0.0.0 0.0.0.0 172.16.1.1       ! activate backup route
+end</div>
+{% if routers | length > 1 %}
+      <p style="margin-top: 0.75rem;">And to <strong>{{ routers[1].name }}</strong> ({{ routers[1].site.name }}):</p>
+      <div class="cmd">conf t
+no ip route 0.0.0.0 0.0.0.0 172.16.0.2
+ip route 0.0.0.0 0.0.0.0 172.16.1.2
+end</div>
+{% endif %}
+    </div>
+
+    <div class="step update">
+      <h3>NetBox Source of Truth updated</h3>
+      <p>
+        <strong>{{ primary.cid }}</strong> marked as Deprovisioning.
+        Visual Explorer WAN map updated in real-time.
+        Full change log recorded in NetBox.
+      </p>
+    </div>
+
+  </div>
+</div>
+
+<!-- ROI Comparison -->
+<div class="card">
+  <h2>Impact: Manual vs. Automated</h2>
+  <div class="comparison">
+    <div class="metric manual">
+      <div class="number">~45 min</div>
+      <div class="desc">Manual failover<br>Spreadsheets, phone calls,<br>engineer tribal knowledge</div>
+    </div>
+    <div class="metric auto">
+      <div class="number">&lt; 30 sec</div>
+      <div class="desc">Automated failover<br>NetBox SoT + Ansible<br>Full audit trail</div>
+    </div>
+  </div>
+</div>
+
+<div class="footer">
+  Generated by Ansible Automation Platform from NetBox Source of Truth &nbsp;|&nbsp;
+  <strong style="color: #00C2A8;">NetBox Labs</strong>
+</div>
+
+</div>
+</body>
+</html>

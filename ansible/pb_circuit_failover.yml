@@ -1,0 +1,280 @@
+---
+# pb_circuit_failover.yml
+#
+# Automated circuit failover driven by NetBox as the Source of Truth.
+#
+# Triggered by a NetBox webhook when a circuit status changes to
+# 'deprovisioning'. Can also be run manually for testing.
+#
+# What it does:
+#   1. Queries the failed circuit from NetBox
+#   2. Discovers the A/Z sites from circuit terminations
+#   3. Finds the best available backup circuit between the same sites
+#   4. Simulates router configuration updates (stub — no real device access)
+#   5. Updates NetBox: marks primary deprovisioning, backup active
+#   6. Generates an HTML failover report
+#
+# Usage (manual):
+#   ansible-playbook ansible/pb_circuit_failover.yml
+#   ansible-playbook ansible/pb_circuit_failover.yml \
+#     --extra-vars "failed_circuit=IPLC-GB-JP-PRI"
+#
+# Usage (from AAP webhook):
+#   Pass the circuit CID in the extra_vars payload as 'failed_circuit'.
+#
+# Output: ansible/reports/failover_report.html
+
+- name: "Automated Circuit Failover — {{ failed_circuit }}"
+  hosts: localhost
+  connection: local
+  gather_facts: true
+
+  vars_files:
+    - vars/netbox_creds.yml
+
+  vars:
+    failed_circuit: "IPLC-GB-PH-PRI"
+    report_dir: "{{ playbook_dir }}/reports"
+
+  tasks:
+
+    # ── Setup ─────────────────────────────────────────────────────────────────
+
+    - name: Create report directory
+      ansible.builtin.file:
+        path: "{{ report_dir }}"
+        state: directory
+        mode: "0755"
+
+    # ── Query failed circuit ───────────────────────────────────────────────────
+
+    - name: Query failed circuit from NetBox
+      ansible.builtin.uri:
+        url: "{{ netbox_url }}/api/circuits/circuits/?cid={{ failed_circuit }}"
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+        return_content: true
+      register: failed_result
+
+    - name: Validate circuit exists
+      ansible.builtin.assert:
+        that: failed_result.json.count > 0
+        fail_msg: "Circuit {{ failed_circuit }} not found in NetBox"
+
+    - name: Set primary circuit facts
+      ansible.builtin.set_fact:
+        primary: "{{ failed_result.json.results[0] }}"
+
+    # ── Discover sites from terminations ──────────────────────────────────────
+
+    - name: Query circuit terminations
+      ansible.builtin.uri:
+        url: "{{ netbox_url }}/api/circuits/circuit-terminations/?circuit_id={{ primary.id }}"
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+        return_content: true
+      register: primary_terms
+
+    - name: Set A-side and Z-side sites
+      ansible.builtin.set_fact:
+        a_side_site: "{{ (primary_terms.json.results | selectattr('term_side', 'eq', 'A') | first).termination }}"
+        z_side_site: "{{ (primary_terms.json.results | selectattr('term_side', 'eq', 'Z') | first).termination }}"
+
+    - name: Show discovered sites
+      ansible.builtin.debug:
+        msg: >-
+          {{ failed_circuit }} connects
+          {{ a_side_site.display }} ↔ {{ z_side_site.display }}.
+          Searching for backup circuits...
+
+    # ── Find backup circuit ───────────────────────────────────────────────────
+
+    - name: Query active circuits at A-side site
+      ansible.builtin.uri:
+        url: "{{ netbox_url }}/api/circuits/circuits/?site_id={{ a_side_site.id }}&tag=dd&status=active"
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+        return_content: true
+      register: a_site_circuits
+
+    - name: Query active circuits at Z-side site
+      ansible.builtin.uri:
+        url: "{{ netbox_url }}/api/circuits/circuits/?site_id={{ z_side_site.id }}&tag=dd&status=active"
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+        return_content: true
+      register: z_site_circuits
+
+    - name: Find circuits present at both sites (excluding the failed one)
+      ansible.builtin.set_fact:
+        z_circuit_ids: "{{ z_site_circuits.json.results | map(attribute='id') | list }}"
+
+    - name: Build backup candidate list
+      ansible.builtin.set_fact:
+        backup_candidates: >-
+          {{
+            a_site_circuits.json.results
+            | selectattr('id', 'in', z_circuit_ids)
+            | rejectattr('id', 'eq', primary.id)
+            | list
+          }}
+
+    - name: Fail if no backup found
+      ansible.builtin.assert:
+        that: backup_candidates | length > 0
+        fail_msg: >-
+          No active backup circuit found between
+          {{ a_side_site.display }} and {{ z_side_site.display }}
+
+    - name: Select best backup (highest commit rate)
+      ansible.builtin.set_fact:
+        backup: "{{ backup_candidates | sort(attribute='commit_rate', reverse=true) | first }}"
+
+    - name: Show backup selection
+      ansible.builtin.debug:
+        msg: |
+          Found {{ backup_candidates | length }} backup candidate(s):
+          {% for c in backup_candidates | sort(attribute='commit_rate', reverse=true) %}
+            {{ '→' if c.id == backup.id else ' ' }} {{ c.cid }} ({{ c.provider.name }}, {{ c.commit_rate // 1000 }} Mbps)
+          {% endfor %}
+          Selected: {{ backup.cid }}
+
+    # ── Query backup terminations ──────────────────────────────────────────────
+
+    - name: Query backup circuit terminations
+      ansible.builtin.uri:
+        url: "{{ netbox_url }}/api/circuits/circuit-terminations/?circuit_id={{ backup.id }}"
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+        return_content: true
+      register: backup_terms
+
+    - name: Set backup site labels
+      ansible.builtin.set_fact:
+        backup_a_site: "{{ (backup_terms.json.results | selectattr('term_side', 'eq', 'A') | first).termination.display }}"
+        backup_z_site: "{{ (backup_terms.json.results | selectattr('term_side', 'eq', 'Z') | first).termination.display }}"
+
+    # ── Query routers at both sites ───────────────────────────────────────────
+
+    - name: Query routers at A-side site
+      ansible.builtin.uri:
+        url: "{{ netbox_url }}/api/dcim/devices/?site_id={{ a_side_site.id }}&role=router&tag=dd"
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+        return_content: true
+      register: a_side_routers
+
+    - name: Query routers at Z-side site
+      ansible.builtin.uri:
+        url: "{{ netbox_url }}/api/dcim/devices/?site_id={{ z_side_site.id }}&role=router&tag=dd"
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+        return_content: true
+      register: z_side_routers
+
+    - name: Combine router list
+      ansible.builtin.set_fact:
+        all_routers: "{{ a_side_routers.json.results + z_side_routers.json.results }}"
+
+    # ── Simulated router operations ───────────────────────────────────────────
+    # In a real deployment these tasks would use ios_config / napalm / etc.
+    # For the demo the routers are simulated — we log what would happen.
+
+    - name: "[SIMULATED] Check primary router interface status"
+      ansible.builtin.debug:
+        msg: |
+          Connecting to {{ a_side_routers.json.results[0].name }} ...
+          GigabitEthernet0/0/0: protocol down, line protocol down
+          Confirmed: primary WAN interface is down.
+
+    - name: "[SIMULATED] Verify backup interface is up"
+      ansible.builtin.debug:
+        msg: |
+          Connecting to {{ a_side_routers.json.results[0].name }} ...
+          GigabitEthernet0/0/2: protocol up, line protocol up
+          Backup WAN interface is available.
+
+    - name: "[SIMULATED] Push failover config to A-side router"
+      ansible.builtin.debug:
+        msg: |
+          Pushing config to {{ a_side_routers.json.results[0].name }} ({{ a_side_site.display }}):
+            conf t
+            no ip route 0.0.0.0 0.0.0.0 172.16.0.1
+            ip route 0.0.0.0 0.0.0.0 {{ backup.custom_fields.get('backup_gateway', '172.16.1.1') }}
+            end
+          Config applied successfully.
+
+    - name: "[SIMULATED] Push failover config to Z-side router"
+      ansible.builtin.debug:
+        msg: |
+          Pushing config to {{ z_side_routers.json.results[0].name }} ({{ z_side_site.display }}):
+            conf t
+            no ip route 0.0.0.0 0.0.0.0 172.16.0.2
+            ip route 0.0.0.0 0.0.0.0 {{ backup.custom_fields.get('backup_gateway', '172.16.1.2') }}
+            end
+          Config applied successfully.
+
+    # ── Update NetBox ─────────────────────────────────────────────────────────
+    # These are real writes — this is what updates the Visual Explorer map.
+
+    - name: Mark failed circuit as deprovisioning in NetBox
+      ansible.builtin.uri:
+        url: "{{ netbox_url }}/api/circuits/circuits/{{ primary.id }}/"
+        method: PATCH
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          status: "deprovisioning"
+        status_code: 200
+      register: primary_update
+
+    - name: Confirm primary circuit updated
+      ansible.builtin.debug:
+        msg: >-
+          {{ primary.cid }} status updated:
+          {{ primary.status.label }} → {{ primary_update.json.status.label }}
+
+    - name: Set backup circuit to active in NetBox
+      ansible.builtin.uri:
+        url: "{{ netbox_url }}/api/circuits/circuits/{{ backup.id }}/"
+        method: PATCH
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          status: "active"
+        status_code: 200
+      register: backup_update
+
+    - name: Confirm backup circuit active
+      ansible.builtin.debug:
+        msg: >-
+          {{ backup.cid }} confirmed:
+          {{ backup_update.json.status.label }}
+
+    # ── Generate HTML report ──────────────────────────────────────────────────
+
+    - name: Generate HTML failover report
+      ansible.builtin.template:
+        src: templates/failover_report.html.j2
+        dest: "{{ report_dir }}/failover_report.html"
+        mode: "0644"
+      vars:
+        primary_a_site: "{{ a_side_site.display }}"
+        primary_z_site: "{{ z_side_site.display }}"
+        routers: "{{ all_routers }}"
+        a_site: "{{ a_side_site }}"
+        z_site: "{{ z_side_site }}"
+        candidates: "{{ backup_candidates }}"
+
+    - name: Failover complete
+      ansible.builtin.debug:
+        msg: |
+          ✓ Failover complete for {{ failed_circuit }}
+            Primary:  {{ primary.cid }} → Deprovisioning
+            Backup:   {{ backup.cid }} ({{ backup.provider.name }}, {{ backup.commit_rate // 1000 }} Mbps)
+            Routers:  config pushed to {{ all_routers | map(attribute='name') | join(', ') }}
+            Report:   {{ report_dir }}/failover_report.html

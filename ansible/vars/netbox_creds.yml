@@ -1,0 +1,6 @@
+---
+# Credentials loaded from environment variables.
+# Locally: source your .env file before running playbooks.
+# In AAP: injected automatically via the NetBox credential type (injects NETBOX_API + NETBOX_TOKEN).
+netbox_url: "{{ lookup('env', 'NETBOX_URL') or lookup('env', 'NETBOX_API') }}"
+netbox_token: "{{ lookup('env', 'NETBOX_TOKEN') }}"

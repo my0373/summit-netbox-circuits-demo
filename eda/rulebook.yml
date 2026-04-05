@@ -1,0 +1,42 @@
+---
+# EDA Rulebook: NetBox Circuit Failover
+#
+# Listens for NetBox webhook events via an EDA event stream.
+# When a circuit tagged 'dd' is set to deprovisioning or failed,
+# triggers the Circuit Failover job template in AAP controller.
+#
+# Event stream source: configured in EDA platform (HTTP endpoint).
+# NetBox webhook posts circuit change events to that endpoint.
+
+- name: NetBox Circuit Failover
+  hosts: all
+  sources:
+    - ansible.eda.webhook:
+        host: 0.0.0.0
+        port: 5000
+
+  rules:
+
+    - name: Circuit set to deprovisioning — trigger failover
+      condition: >
+        event.payload.model == "circuit" and
+        event.payload.data.status.value == "deprovisioning"
+      action:
+        run_job_template:
+          name: "Circuit Failover"
+          organization: "Summit"
+          job_args:
+            extra_vars:
+              failed_circuit: "{{ event.payload.data.cid }}"
+
+    - name: Circuit set to failed — trigger failover
+      condition: >
+        event.payload.model == "circuit" and
+        event.payload.data.status.value == "failed"
+      action:
+        run_job_template:
+          name: "Circuit Failover"
+          organization: "Summit"
+          job_args:
+            extra_vars:
+              failed_circuit: "{{ event.payload.data.cid }}"

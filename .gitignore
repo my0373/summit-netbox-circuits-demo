@@ -1,0 +1,13 @@
+# Credentials — never commit the real .env file
+.env
+*.env
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+dist/
+
+# macOS
+.DS_Store
