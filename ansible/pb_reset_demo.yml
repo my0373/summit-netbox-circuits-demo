@@ -64,9 +64,45 @@
         label: "{{ item.item.cid }}"
       when: reset_results.results | length > 0
 
+    # ── Set Bristol–Manila circuits offline ───────────────────────────────────
+    # The demo uses Bristol–Atlanta. The GB-PH circuits should show as offline
+    # so the Visual Explorer map focuses on the correct topology.
+
+    - name: Find Bristol–Manila circuits to set offline
+      ansible.builtin.set_fact:
+        ph_circuits: >-
+          {{
+            all_circuits.json.results
+            | selectattr('cid', 'match', '.*-PH-.*|MPLS-GB-PH.*')
+            | rejectattr('status.value', 'eq', 'offline')
+            | list
+          }}
+
+    - name: Report Bristol–Manila circuits being set offline
+      ansible.builtin.debug:
+        msg: >-
+          Setting {{ ph_circuits | length }} Bristol–Manila circuit(s) to offline:
+          {{ ph_circuits | map(attribute='cid') | join(', ') | default('none') }}
+
+    - name: Set Bristol–Manila circuits to offline
+      ansible.builtin.uri:
+        url: "{{ netbox_url }}/api/circuits/circuits/{{ item.id }}/"
+        method: PATCH
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          status: "offline"
+        status_code: 200
+      loop: "{{ ph_circuits }}"
+      loop_control:
+        label: "{{ item.cid }}"
+
     - name: All done
       ansible.builtin.debug:
         msg: >-
           Demo reset complete.
           {{ circuits_to_reset | length }} circuit(s) restored to Active.
+          {{ ph_circuits | length }} Bristol–Manila circuit(s) set to Offline.
           NetBox and Visual Explorer are back to starting state.
