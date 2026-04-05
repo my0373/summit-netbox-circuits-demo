@@ -7,14 +7,28 @@
 #
 # Then registers both VMs with AAP (Machine credential + report server host).
 #
-# Assumes:
-#   - AWS credentials are already configured (env vars or ~/.aws)
-#   - .env exists (run ./setup.sh first)
-#   - AAP is configured (run: uv run --with requests python setup_aap.py first)
+# Prerequisites:
+#   1. Authenticate to AWS first:
+#        assume --region eu-west-2
+#   2. Run ./setup.sh (creates .env)
+#   3. Run: uv run --with requests python setup_aap.py (configures AAP)
 #
 # Usage: ./setup_infra.sh
 
 set -euo pipefail
+
+# ── Check AWS credentials are available ───────────────────────────────────────
+if ! aws sts get-caller-identity --region eu-west-2 &>/dev/null; then
+  echo ""
+  echo "ERROR: No valid AWS credentials found."
+  echo ""
+  echo "  Run this first:  assume --region eu-west-2"
+  echo ""
+  exit 1
+fi
+
+AWS_ACCOUNT=$(aws sts get-caller-identity --region eu-west-2 --query Account --output text)
+echo "AWS credentials OK (account: $AWS_ACCOUNT, region: eu-west-2)"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 INFRA_DIR="$SCRIPT_DIR/infra"
@@ -36,6 +50,7 @@ terraform init -upgrade -input=false
 
 # Pass the NetBox token to Terraform so the MCP VM can be configured
 terraform apply -auto-approve -input=false \
+  -var="aws_region=eu-west-2" \
   -var="netbox_url=${NETBOX_URL}" \
   -var="netbox_token=${NETBOX_TOKEN}"
 
