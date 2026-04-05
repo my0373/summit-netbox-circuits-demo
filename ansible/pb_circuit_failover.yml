@@ -3,8 +3,8 @@
 #
 # Automated circuit failover driven by NetBox as the Source of Truth.
 #
-# Triggered by a NetBox webhook when a circuit status changes to
-# 'offline'. Can also be run manually for testing.
+# Triggered by a NetBox webhook (via AAP workflow) when a circuit status
+# changes to 'offline'. Can also be run manually for testing.
 #
 # What it does:
 #   1. Queries the failed circuit from NetBox
@@ -12,17 +12,17 @@
 #   3. Finds the best available backup circuit between the same sites
 #   4. Simulates router configuration updates (stub — no real device access)
 #   5. Updates NetBox: marks primary offline, backup active
-#   6. Generates an HTML failover report
+#
+# Report generation and deployment is handled by pb_deploy_report.yml,
+# which runs as the second step in the Circuit Failover workflow.
 #
 # Usage (manual):
 #   ansible-playbook ansible/pb_circuit_failover.yml
 #   ansible-playbook ansible/pb_circuit_failover.yml \
 #     --extra-vars "failed_circuit=IPLC-GB-JP-PRI"
 #
-# Usage (from AAP webhook):
+# Usage (from AAP workflow):
 #   Pass the circuit CID in the extra_vars payload as 'failed_circuit'.
-#
-# Output: ansible/reports/failover_report.html
 
 - name: "Automated Circuit Failover — {{ failed_circuit }}"
   hosts: localhost
@@ -268,80 +268,11 @@
           {{ backup.cid }} confirmed:
           {{ backup_update.json.status.label }}
 
-    # ── Generate HTML report ──────────────────────────────────────────────────
-
-    - name: Generate HTML failover report
-      ansible.builtin.template:
-        src: templates/failover_report.html.j2
-        dest: "{{ report_dir }}/failover_report.html"
-        mode: "0644"
-      vars:
-        primary_a_site: "{{ a_side_site.display }}"
-        primary_z_site: "{{ z_side_site.display }}"
-        routers: "{{ all_routers }}"
-        a_site: "{{ a_side_site }}"
-        z_site: "{{ z_side_site }}"
-        candidates: "{{ backup_candidates }}"
-
     - name: Failover complete
       ansible.builtin.debug:
         msg: |
-          ✓ Failover complete for {{ failed_circuit }}
-            Primary:  {{ primary.cid }} → Deprovisioning
+          Failover complete for {{ failed_circuit }}
+            Primary:  {{ primary.cid }} -> Offline
             Backup:   {{ backup.cid }} ({{ backup.provider.name }}, {{ backup.commit_rate // 1000 }} Mbps)
             Routers:  config pushed to {{ all_routers | map(attribute='name') | join(', ') }}
-            Report:   {{ report_dir }}/failover_report.html
-
-# ── Play 2: Register report server (if configured) ────────────────────────────
-# Reads vars/infra.yml (written by setup_infra.sh). If no server is configured
-# the file has report_server_host: "" and this play exits early, leaving the
-# report_servers group empty — Play 3 will then be skipped gracefully.
-
-- name: Register report server for publishing
-  hosts: localhost
-  gather_facts: false
-
-  vars_files:
-    - vars/infra.yml
-
-  tasks:
-
-    - name: Skip if no report server configured
-      ansible.builtin.meta: end_play
-      when: report_server_host | default('') | length == 0
-
-    - name: Add report server to dynamic inventory
-      ansible.builtin.add_host:
-        name: "{{ report_server_host }}"
-        groups: report_servers
-        ansible_port: "{{ report_server_port | default(2222) }}"
-        ansible_user: "{{ report_server_user | default('ec2-user') }}"
-        report_url: "{{ report_url | default('https://' + report_server_host + '/failover_report.html') }}"
-
-# ── Play 3: Publish report to web server ──────────────────────────────────────
-# Targets the dynamically added report server. If Play 2 ended early (no infra),
-# the report_servers group is empty and this play is skipped with a warning.
-
-- name: Publish failover report to web server
-  hosts: report_servers
-  gather_facts: false
-
-  tasks:
-
-    - name: Ensure web root exists
-      ansible.builtin.file:
-        path: /var/www/html
-        state: directory
-        mode: "0755"
-      become: true
-
-    - name: Upload failover report
-      ansible.builtin.copy:
-        src: "{{ playbook_dir }}/reports/failover_report.html"
-        dest: /var/www/html/failover_report.html
-        mode: "0644"
-      become: true
-
-    - name: Report published
-      ansible.builtin.debug:
-        msg: "Report live at {{ report_url }}"
+          Report will be generated and deployed by the next workflow step.

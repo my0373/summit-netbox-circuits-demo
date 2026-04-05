@@ -1,0 +1,207 @@
+---
+# pb_deploy_report.yml
+#
+# Second step in the Circuit Failover workflow.
+#
+# Re-queries NetBox for the current state of the failed circuit and its
+# backup, generates the HTML failover report, then deploys it to the
+# report web server.
+#
+# Expects 'failed_circuit' to be set as an extra var (passed through
+# from the workflow).
+#
+# Usage (manual):
+#   ansible-playbook ansible/pb_deploy_report.yml \
+#     --extra-vars "failed_circuit=IPLC-GB-PH-PRI"
+
+- name: "Generate and deploy failover report — {{ failed_circuit }}"
+  hosts: localhost
+  connection: local
+  gather_facts: true
+
+  vars_files:
+    - vars/netbox_creds.yml
+
+  vars:
+    failed_circuit: "IPLC-GB-PH-PRI"
+    report_dir: "{{ playbook_dir }}/reports"
+
+  tasks:
+
+    - name: Create report directory
+      ansible.builtin.file:
+        path: "{{ report_dir }}"
+        state: directory
+        mode: "0755"
+
+    # ── Re-query current circuit state from NetBox ────────────────────────────
+
+    - name: Query failed circuit from NetBox
+      ansible.builtin.uri:
+        url: "{{ netbox_url }}/api/circuits/circuits/?cid={{ failed_circuit }}"
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+        return_content: true
+        validate_certs: false
+      register: failed_result
+
+    - name: Set primary circuit facts
+      ansible.builtin.set_fact:
+        primary: "{{ failed_result.json.results[0] }}"
+
+    - name: Query primary circuit terminations
+      ansible.builtin.uri:
+        url: "{{ netbox_url }}/api/circuits/circuit-terminations/?circuit_id={{ primary.id }}"
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+        return_content: true
+        validate_certs: false
+      register: primary_terms
+
+    - name: Set A-side and Z-side sites
+      ansible.builtin.set_fact:
+        a_side_site: "{{ (primary_terms.json.results | selectattr('term_side', 'eq', 'A') | first).termination }}"
+        z_side_site: "{{ (primary_terms.json.results | selectattr('term_side', 'eq', 'Z') | first).termination }}"
+
+    # ── Find the active backup circuit ───────────────────────────────────────
+    # The failover playbook has already activated the backup, so we query for
+    # active circuits at both sites to find it.
+
+    - name: Query active circuits at A-side site
+      ansible.builtin.uri:
+        url: "{{ netbox_url }}/api/circuits/circuits/?site_id={{ a_side_site.id }}&tag=dd&status=active"
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+        return_content: true
+        validate_certs: false
+      register: a_site_circuits
+
+    - name: Query active circuits at Z-side site
+      ansible.builtin.uri:
+        url: "{{ netbox_url }}/api/circuits/circuits/?site_id={{ z_side_site.id }}&tag=dd&status=active"
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+        return_content: true
+        validate_certs: false
+      register: z_site_circuits
+
+    - name: Find active backup circuit (present at both sites, not the failed one)
+      ansible.builtin.set_fact:
+        z_circuit_ids: "{{ z_site_circuits.json.results | map(attribute='id') | list }}"
+        backup_candidates: >-
+          {{
+            a_site_circuits.json.results
+            | selectattr('id', 'in', z_site_circuits.json.results | map(attribute='id') | list)
+            | rejectattr('id', 'eq', primary.id)
+            | list
+          }}
+
+    - name: Select backup circuit (highest commit rate)
+      ansible.builtin.set_fact:
+        backup: "{{ backup_candidates | sort(attribute='commit_rate', reverse=true) | first }}"
+
+    - name: Query backup circuit terminations
+      ansible.builtin.uri:
+        url: "{{ netbox_url }}/api/circuits/circuit-terminations/?circuit_id={{ backup.id }}"
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+        return_content: true
+        validate_certs: false
+      register: backup_terms
+
+    - name: Set backup site labels
+      ansible.builtin.set_fact:
+        backup_a_site: "{{ (backup_terms.json.results | selectattr('term_side', 'eq', 'A') | first).termination.display }}"
+        backup_z_site: "{{ (backup_terms.json.results | selectattr('term_side', 'eq', 'Z') | first).termination.display }}"
+
+    # ── Query routers at both sites ───────────────────────────────────────────
+
+    - name: Query routers at A-side site
+      ansible.builtin.uri:
+        url: "{{ netbox_url }}/api/dcim/devices/?site_id={{ a_side_site.id }}&role=router&tag=dd"
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+        return_content: true
+        validate_certs: false
+      register: a_side_routers
+
+    - name: Query routers at Z-side site
+      ansible.builtin.uri:
+        url: "{{ netbox_url }}/api/dcim/devices/?site_id={{ z_side_site.id }}&role=router&tag=dd"
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+        return_content: true
+        validate_certs: false
+      register: z_side_routers
+
+    - name: Combine router list
+      ansible.builtin.set_fact:
+        all_routers: "{{ a_side_routers.json.results + z_side_routers.json.results }}"
+
+    # ── Generate HTML report ──────────────────────────────────────────────────
+
+    - name: Generate HTML failover report
+      ansible.builtin.template:
+        src: templates/failover_report.html.j2
+        dest: "{{ report_dir }}/failover_report.html"
+        mode: "0644"
+      vars:
+        primary_a_site: "{{ a_side_site.display }}"
+        primary_z_site: "{{ z_side_site.display }}"
+        routers: "{{ all_routers }}"
+        a_site: "{{ a_side_site }}"
+        z_site: "{{ z_side_site }}"
+        candidates: "{{ backup_candidates }}"
+
+    - name: Report generated
+      ansible.builtin.debug:
+        msg: "Report generated: {{ report_dir }}/failover_report.html"
+
+# ── Play 2: Register report server (if configured) ────────────────────────────
+
+- name: Register report server for publishing
+  hosts: localhost
+  gather_facts: false
+
+  vars_files:
+    - vars/infra.yml
+
+  tasks:
+
+    - name: Skip if no report server configured
+      ansible.builtin.meta: end_play
+      when: report_server_host | default('') | length == 0
+
+    - name: Add report server to dynamic inventory
+      ansible.builtin.add_host:
+        name: "{{ report_server_host }}"
+        groups: report_servers
+        ansible_port: "{{ report_server_port | default(2222) }}"
+        ansible_user: "{{ report_server_user | default('ec2-user') }}"
+        report_url: "{{ report_url | default('https://' + report_server_host + '/failover_report.html') }}"
+
+# ── Play 3: Publish report to web server ──────────────────────────────────────
+
+- name: Publish failover report to web server
+  hosts: report_servers
+  gather_facts: false
+
+  tasks:
+
+    - name: Ensure web root exists
+      ansible.builtin.file:
+        path: /var/www/html
+        state: directory
+        mode: "0755"
+      become: true
+
+    - name: Upload failover report
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/reports/failover_report.html"
+        dest: /var/www/html/failover_report.html
+        mode: "0644"
+      become: true
+
+    - name: Report published
+      ansible.builtin.debug:
+        msg: "Report live at {{ report_url }}"
