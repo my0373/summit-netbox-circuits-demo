@@ -26,7 +26,7 @@ provider "aws" {
   }
 }
 
-# ── SSH Key Pair (randomly generated) ─────────────────────────────────────────
+# ── SSH Key Pair (single key pair shared across both VMs) ─────────────────────
 
 resource "tls_private_key" "summit_demo" {
   algorithm = "RSA"
@@ -67,13 +67,12 @@ data "aws_ami" "amazon_linux_2023" {
   }
 }
 
-# ── Security Group ─────────────────────────────────────────────────────────────
+# ── Security Group: Report Server ──────────────────────────────────────────────
 
-resource "aws_security_group" "summit_demo" {
+resource "aws_security_group" "report_server" {
   name        = "RedhatSummitEDADemo-report-server"
   description = "Summit demo report web server — HTTP redirect, HTTPS, non-standard SSH"
 
-  # HTTP — redirect to HTTPS
   ingress {
     from_port   = 80
     to_port     = 80
@@ -82,7 +81,6 @@ resource "aws_security_group" "summit_demo" {
     description = "HTTP (redirect to HTTPS)"
   }
 
-  # HTTPS — serve the failover report
   ingress {
     from_port   = 443
     to_port     = 443
@@ -91,7 +89,6 @@ resource "aws_security_group" "summit_demo" {
     description = "HTTPS report server"
   }
 
-  # Non-standard SSH — for AAP and local access
   ingress {
     from_port   = var.ssh_port
     to_port     = var.ssh_port
@@ -109,13 +106,36 @@ resource "aws_security_group" "summit_demo" {
   }
 }
 
-# ── EC2 Instance ───────────────────────────────────────────────────────────────
+# ── Security Group: MCP Server ─────────────────────────────────────────────────
 
-resource "aws_instance" "summit_demo" {
+resource "aws_security_group" "mcp_server" {
+  name        = "RedhatSummitEDADemo-mcp-server"
+  description = "Summit demo NetBox MCP server — non-standard SSH only (stdio over SSH)"
+
+  ingress {
+    from_port   = var.ssh_port
+    to_port     = var.ssh_port
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "SSH on non-standard port ${var.ssh_port}"
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "All outbound (NetBox API calls)"
+  }
+}
+
+# ── EC2 Instance: Report Server ────────────────────────────────────────────────
+
+resource "aws_instance" "report_server" {
   ami                    = data.aws_ami.amazon_linux_2023.id
   instance_type          = var.instance_type
   key_name               = aws_key_pair.summit_demo.key_name
-  vpc_security_group_ids = [aws_security_group.summit_demo.id]
+  vpc_security_group_ids = [aws_security_group.report_server.id]
 
   user_data = templatefile("${path.module}/userdata.sh.tpl", {
     ssh_port = var.ssh_port
@@ -126,15 +146,45 @@ resource "aws_instance" "summit_demo" {
     volume_type = "gp3"
 
     tags = {
-      Name  = "RedhatSummitEDADemo"
+      Name  = "RedhatSummitEDADemo-report"
       owner = "myork@netboxlabs.com"
     }
   }
 }
 
-# ── Elastic IP (persistent public IP) ────────────────────────────────────────
+# ── EC2 Instance: MCP Server ───────────────────────────────────────────────────
 
-resource "aws_eip" "summit_demo" {
-  instance = aws_instance.summit_demo.id
+resource "aws_instance" "mcp_server" {
+  ami                    = data.aws_ami.amazon_linux_2023.id
+  instance_type          = var.mcp_instance_type
+  key_name               = aws_key_pair.summit_demo.key_name
+  vpc_security_group_ids = [aws_security_group.mcp_server.id]
+
+  user_data = templatefile("${path.module}/userdata_mcp.sh.tpl", {
+    ssh_port      = var.ssh_port
+    netbox_url    = var.netbox_url
+    netbox_token  = var.netbox_token
+  })
+
+  root_block_device {
+    volume_size = 8
+    volume_type = "gp3"
+
+    tags = {
+      Name  = "RedhatSummitEDADemo-mcp"
+      owner = "myork@netboxlabs.com"
+    }
+  }
+}
+
+# ── Elastic IPs ────────────────────────────────────────────────────────────────
+
+resource "aws_eip" "report_server" {
+  instance = aws_instance.report_server.id
+  domain   = "vpc"
+}
+
+resource "aws_eip" "mcp_server" {
+  instance = aws_instance.mcp_server.id
   domain   = "vpc"
 }
