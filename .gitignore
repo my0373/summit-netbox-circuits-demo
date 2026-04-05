@@ -11,3 +11,15 @@ dist/
 
 # macOS
 .DS_Store
+
+# Terraform
+infra/.terraform/
+infra/.terraform.lock.hcl
+infra/terraform.tfstate
+infra/terraform.tfstate.backup
+infra/terraform.tfvars
+infra/keys/
+
+# Generated infra vars (written by setup_infra.sh) — commit infra.yml.example not infra.yml
+ansible/vars/infra.yml
+!ansible/vars/infra.yml.example

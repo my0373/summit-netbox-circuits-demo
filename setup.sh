@@ -13,6 +13,12 @@ fi
 echo "Installing Python dependencies with uv..."
 uv sync
 
+# Create infra.yml placeholder if not present
+if [ ! -f ansible/vars/infra.yml ]; then
+    cp ansible/vars/infra.yml.example ansible/vars/infra.yml
+    echo "ansible/vars/infra.yml created (empty — run ./setup_infra.sh to populate)."
+fi
+
 echo ""
 echo "Setup complete. Next steps:"
 echo "  1. Fill in .env with your NetBox and AAP credentials (if not done)"

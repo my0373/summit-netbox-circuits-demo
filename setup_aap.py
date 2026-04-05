@@ -30,6 +30,7 @@ import sys
 import time
 import json
 import base64
+import argparse
 import requests
 from urllib.parse import urljoin
 
@@ -156,9 +157,6 @@ def wait_for_eda_project_sync(eda, project_id, timeout=120):
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def main():
-    import urllib3
-    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
     ctrl = AAPClient(AAP_HOST, AAP_USER, AAP_PASS)
     eda  = AAPClient(AAP_HOST, AAP_USER, AAP_PASS)
 
@@ -529,5 +527,96 @@ def main():
 """)
 
 
+def register_report_server(ctrl, inv_id, report_server_ip, report_server_port, private_key_path):
+    """Add the report server host to the inventory and create a Machine credential."""
+
+    # ── Machine credential ────────────────────────────────────────────────────
+    section("Controller: Machine Credential — Report Server")
+
+    with open(private_key_path) as f:
+        private_key = f.read()
+
+    machine_cred, _ = ctrl.get_or_create(
+        "/api/controller/v2/credentials/",
+        "Summit Demo Report Server SSH",
+        {
+            "name": "Summit Demo Report Server SSH",
+            "organization": ORG_ID,
+            "credential_type": 1,  # Machine (SSH)
+            "inputs": {
+                "username": "ec2-user",
+                "ssh_key_data": private_key,
+            },
+            "description": "SSH key for the Summit demo report web server (EC2)",
+        },
+    )
+    machine_cred_id = machine_cred["id"]
+
+    # ── Report server host in inventory ──────────────────────────────────────
+    section("Controller: Inventory — Report Server Host")
+
+    existing = ctrl.get(f"/api/controller/v2/inventories/{inv_id}/hosts/",
+                        params={"name": report_server_ip})
+    if existing["count"] == 0:
+        ctrl.post("/api/controller/v2/hosts/", {
+            "name": report_server_ip,
+            "inventory": inv_id,
+            "variables": f"ansible_port: {report_server_port}\nansible_user: ec2-user",
+        })
+        print(f"  CREATED host {report_server_ip} (port {report_server_port})")
+    else:
+        host_id = existing["results"][0]["id"]
+        ctrl.patch(f"/api/controller/v2/hosts/{host_id}/", {
+            "variables": f"ansible_port: {report_server_port}\nansible_user: ec2-user",
+        })
+        print(f"  UPDATED host {report_server_ip} [{host_id}]")
+
+    # ── Attach machine credential to failover job template ───────────────────
+    section("Controller: Attach Machine Credential to Circuit Failover")
+
+    jt_failover = ctrl.find("/api/controller/v2/job_templates/", "Circuit Failover")
+    if jt_failover:
+        jt_id = jt_failover["id"]
+        existing_creds = ctrl.get(f"/api/controller/v2/job_templates/{jt_id}/credentials/")
+        cred_ids = [c["id"] for c in existing_creds.get("results", [])]
+        if machine_cred_id not in cred_ids:
+            ctrl.post(f"/api/controller/v2/job_templates/{jt_id}/credentials/", {
+                "id": machine_cred_id,
+                "associate": True,
+            })
+            print("  Attached Machine credential to Circuit Failover template")
+        else:
+            print("  Machine credential already attached")
+    else:
+        print("  WARNING: Circuit Failover job template not found")
+
+    section("Report Server Registration Complete")
+    print(f"  Host:     {report_server_ip}:{report_server_port}")
+    print(f"  Key:      {private_key_path}")
+    print(f"  Cred ID:  {machine_cred_id}")
+
+
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Set up AAP for Summit NetBox Circuits Demo")
+    parser.add_argument("--report-server-ip", help="Public IP of the report web server")
+    parser.add_argument("--report-server-port", type=int, default=2222, help="SSH port of the report server")
+    parser.add_argument("--private-key-path", help="Path to the SSH private key for the report server")
+    args = parser.parse_args()
+
+    import urllib3
+    # Move urllib3 disable here so main() doesn't need it
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
     main()
+
+    if args.report_server_ip and args.private_key_path:
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        ctrl = AAPClient(AAP_HOST, AAP_USER, AAP_PASS)
+        inv = ctrl.find("/api/controller/v2/inventories/", "Summit Demo - Localhost")
+        inv_id = inv["id"] if inv else None
+        if inv_id:
+            register_report_server(ctrl, inv_id, args.report_server_ip,
+                                   args.report_server_port, args.private_key_path)
+        else:
+            print("ERROR: Could not find inventory. Run setup_aap.py without --report-server-ip first.")
