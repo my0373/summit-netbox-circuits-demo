@@ -12,7 +12,7 @@
 #
 # Usage (manual):
 #   ansible-playbook ansible/pb_deploy_report.yml \
-#     --extra-vars "failed_circuit=IPLC-GB-PH-PRI"
+#     --extra-vars "failed_circuit=IPLC-GB-AT-PRI"
 
 - name: "Generate and deploy failover report — {{ failed_circuit }}"
   hosts: localhost
@@ -23,7 +23,7 @@
     - vars/netbox_creds.yml
 
   vars:
-    failed_circuit: "IPLC-GB-PH-PRI"
+    failed_circuit: "IPLC-GB-AT-PRI"
     report_dir: "{{ playbook_dir }}/reports"
 
   tasks:

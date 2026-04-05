@@ -2,19 +2,19 @@
 
 Automated circuit failover driven by NetBox as the source of truth, built for Red Hat Summit 2026.
 
-A global enterprise runs WAN circuits between its UK hub (GB-Bristol) and a regional office in Manila (PH-Manila-01). The primary circuit goes down. With NetBox and AAP, the entire failover — router reconfiguration, CMDB update, and incident report — happens in seconds with no manual intervention.
+A global enterprise runs WAN circuits between its UK hub (GB-Bristol) and a regional office in Atlanta (US-Atlanta). The primary circuit goes down. With NetBox and AAP, the entire failover — router reconfiguration, CMDB update, and incident report — happens in seconds with no manual intervention.
 
 ## Demo Flow
 
 ### 1. Set the scene
 
-Open **NetBox Visual Explorer** and show the live topology. All circuits are active and the map shows full connectivity between GB-Bristol and PH-Manila-01.
+Open **NetBox Visual Explorer** and show the live topology. All circuits are active and the map shows full connectivity between GB-Bristol and US-Atlanta.
 
 ### 2. Trigger the failure
 
 Tell **NetBox Copilot**:
 
-> "IPLC-GB-PH-PRI has failed — set it to offline"
+> "IPLC-GB-AT-PRI has failed — set it to offline"
 
 Copilot PATCHes the circuit status to `offline` via the NetBox API.
 
@@ -24,7 +24,7 @@ The status change fires a **NetBox event rule**, which sends a webhook to AAP la
 
 **Step 1 — Circuit Failover** (`pb_circuit_failover.yml`):
 
-- Queries NetBox for the failed circuit and resolves its A-side (GB-Bristol) and Z-side (PH-Manila-01) sites from circuit terminations
+- Queries NetBox for the failed circuit and resolves its A-side (GB-Bristol) and Z-side (US-Atlanta) sites from circuit terminations
 - Finds all active circuits with the `dd` tag present at both sites
 - Selects the best backup by committed bandwidth
 - Simulates pushing a failover routing config to routers at both ends (stub — no real devices in the demo)
@@ -54,7 +54,7 @@ The report shows the full incident summary: which circuit failed, which backup w
 
 Ask Claude (connected to NetBox via the MCP server):
 
-> "What is the current status of IPLC-GB-PH-PRI?"
+> "What is the current status of IPLC-GB-AT-PRI?"
 
 Claude queries NetBox directly through the MCP server and confirms the circuit is offline and the backup is active — no UI needed.
 

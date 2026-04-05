@@ -2,7 +2,7 @@
 
 ## The Scenario
 
-A global enterprise runs WAN circuits between its UK hub (GB-Bristol) and regional offices including Manila (PH-Manila-01). The primary circuit goes down. Without automation, the network team would need to:
+A global enterprise runs WAN circuits between its UK hub (GB-Bristol) and regional offices including Atlanta (US-Atlanta). The primary circuit goes down. Without automation, the network team would need to:
 
 - Detect the failure and identify the backup circuit manually
 - Log into routers at both ends and reconfigure routing
@@ -16,7 +16,7 @@ With NetBox as the Source of Truth and AAP as the automation engine, the entire 
 ```
 Presenter tells Copilot the circuit has failed
         ↓
-NetBox Copilot sets IPLC-GB-PH-PRI → offline
+NetBox Copilot sets IPLC-GB-AT-PRI → offline
         ↓
 NetBox event rule fires → webhook to AAP
         ↓
@@ -38,7 +38,7 @@ Visual Explorer map updates live (failed circuit disappears)
         ↓
 Presenter opens report URL — shows full incident summary
         ↓
-Presenter asks Claude (via NetBox MCP): "What is the status of IPLC-GB-PH-PRI?"
+Presenter asks Claude (via NetBox MCP): "What is the status of IPLC-GB-AT-PRI?"
 ```
 
 ## Architecture

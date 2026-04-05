@@ -33,7 +33,7 @@
     - vars/netbox_creds.yml
 
   vars:
-    failed_circuit: "IPLC-GB-PH-PRI"
+    failed_circuit: "IPLC-GB-AT-PRI"
     report_dir: "{{ playbook_dir }}/reports"
 
   tasks:
