@@ -110,18 +110,18 @@
 
     # ── Find backup circuit ───────────────────────────────────────────────────
 
-    - name: Query active circuits at A-side site
+    - name: Query dd-tagged circuits at A-side site
       ansible.builtin.uri:
-        url: "{{ netbox_url }}/api/circuits/circuits/?site_id={{ a_side_site.id }}&tag=dd&status=active"
+        url: "{{ netbox_url }}/api/circuits/circuits/?site_id={{ a_side_site.id }}&tag=dd"
         headers:
           Authorization: "Token {{ netbox_token }}"
         return_content: true
         validate_certs: false
       register: a_site_circuits
 
-    - name: Query active circuits at Z-side site
+    - name: Query dd-tagged circuits at Z-side site
       ansible.builtin.uri:
-        url: "{{ netbox_url }}/api/circuits/circuits/?site_id={{ z_side_site.id }}&tag=dd&status=active"
+        url: "{{ netbox_url }}/api/circuits/circuits/?site_id={{ z_side_site.id }}&tag=dd"
         headers:
           Authorization: "Token {{ netbox_token }}"
         return_content: true
