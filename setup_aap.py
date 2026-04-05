@@ -80,9 +80,11 @@ class AAPClient:
     def post(self, path, data):
         url = urljoin(self.base_url + "/", path.lstrip("/"))
         r = self.session.post(url, json=data)
-        if r.status_code not in (200, 201):
+        if r.status_code not in (200, 201, 204):
             print(f"  ERROR {r.status_code}: {r.text[:400]}")
             r.raise_for_status()
+        if r.status_code == 204 or not r.text:
+            return {}
         return r.json()
 
     def patch(self, path, data):
