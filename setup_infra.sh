@@ -8,24 +8,19 @@
 # Then registers both VMs with AAP (Machine credential + report server host).
 #
 # Prerequisites:
-#   1. Authenticate to AWS first:
-#        assume --region eu-west-2
-#   2. Run ./setup.sh (creates .env)
-#   3. Run: uv run --with requests python setup_aap.py (configures AAP)
+#   1. Run ./setup.sh (creates .env)
+#   2. Run: uv run --with requests python setup_aap.py (configures AAP)
 #
 # Usage: ./setup_infra.sh
 
 set -euo pipefail
 
-# ── Check AWS credentials are available ───────────────────────────────────────
-if ! aws sts get-caller-identity --region eu-west-2 &>/dev/null; then
-  echo ""
-  echo "ERROR: No valid AWS credentials found."
-  echo ""
-  echo "  Run this first:  assume --region eu-west-2"
-  echo ""
+# ── Assume AWS role ───────────────────────────────────────────────────────────
+echo "Assuming AWS credentials (eu-west-2)..."
+eval "$(assume --region eu-west-2)" || {
+  echo "ERROR: 'assume --region eu-west-2' failed. Check your assume configuration."
   exit 1
-fi
+}
 
 AWS_ACCOUNT=$(aws sts get-caller-identity --region eu-west-2 --query Account --output text)
 echo "AWS credentials OK (account: $AWS_ACCOUNT, region: eu-west-2)"
