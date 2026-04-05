@@ -54,6 +54,7 @@
         headers:
           Authorization: "Token {{ netbox_token }}"
         return_content: true
+        validate_certs: false
       register: failed_result
 
     - name: Validate circuit exists
@@ -73,6 +74,7 @@
         headers:
           Authorization: "Token {{ netbox_token }}"
         return_content: true
+        validate_certs: false
       register: primary_terms
 
     - name: Set A-side and Z-side sites
@@ -95,6 +97,7 @@
         headers:
           Authorization: "Token {{ netbox_token }}"
         return_content: true
+        validate_certs: false
       register: a_site_circuits
 
     - name: Query active circuits at Z-side site
@@ -103,6 +106,7 @@
         headers:
           Authorization: "Token {{ netbox_token }}"
         return_content: true
+        validate_certs: false
       register: z_site_circuits
 
     - name: Find circuits present at both sites (excluding the failed one)
@@ -147,6 +151,7 @@
         headers:
           Authorization: "Token {{ netbox_token }}"
         return_content: true
+        validate_certs: false
       register: backup_terms
 
     - name: Set backup site labels
@@ -162,6 +167,7 @@
         headers:
           Authorization: "Token {{ netbox_token }}"
         return_content: true
+        validate_certs: false
       register: a_side_routers
 
     - name: Query routers at Z-side site
@@ -170,6 +176,7 @@
         headers:
           Authorization: "Token {{ netbox_token }}"
         return_content: true
+        validate_certs: false
       register: z_side_routers
 
     - name: Combine router list
@@ -228,6 +235,7 @@
         body:
           status: "offline"
         status_code: 200
+        validate_certs: false
       register: primary_update
 
     - name: Confirm primary circuit updated
@@ -247,6 +255,7 @@
         body:
           status: "active"
         status_code: 200
+        validate_certs: false
       register: backup_update
 
     - name: Confirm backup circuit active
