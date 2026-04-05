@@ -163,9 +163,6 @@
   hosts: localhost
   gather_facts: false
 
-  vars_files:
-    - vars/infra.yml
-
   tasks:
 
     - name: Skip if no report server configured
