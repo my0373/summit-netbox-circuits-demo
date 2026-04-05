@@ -177,7 +177,50 @@ add_logo(s)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Slide 3 — Why did it take 45 minutes?
+# Slide 3 — Three things that have to happen
+# ═══════════════════════════════════════════════════════════════════════════════
+s = new_slide()
+accent_bar(s)
+
+txb(s, "When a Circuit Fails, Three Things Have to Happen",
+    Inches(0.5), Inches(0.2), Inches(12.5), Inches(0.75),
+    size=32, bold=True, color=TEAL)
+
+txb(s, "Every time. Under pressure. With the clock running.",
+    Inches(0.5), Inches(1.0), Inches(12), Inches(0.45),
+    size=18, color=GREY, italic=True)
+
+tasks = [
+    ("1", RED,   "Disable the failed circuit",
+     "Identify the failed link, confirm it is down, and mark it as offline in your systems.\nWith no single source of truth, just finding it can take 10\u201315 minutes."),
+    ("2", AMBER, "Fail over to the most appropriate alternative",
+     "Find a backup circuit that serves the same sites. Determine which routers are involved.\nChoose the best option based on capacity and cost \u2014 manually, from memory or spreadsheets."),
+    ("3", TEAL,  "Document everything for management",
+     "Record what failed, when, what was done, and who made each decision.\nThis is often skipped under pressure \u2014 or done hours later from memory."),
+]
+
+y = Inches(1.65)
+for num, col, title, body in tasks:
+    # Number badge
+    nr = s.shapes.add_shape(1, Inches(0.35), y + Inches(0.1), Inches(0.55), Inches(0.55))
+    nr.fill.solid(); nr.fill.fore_color.rgb = col; nr.line.fill.background()
+    txb(s, num, Inches(0.35), y + Inches(0.08), Inches(0.55), Inches(0.55),
+        size=22, bold=True, color=NAVY, align=PP_ALIGN.CENTER)
+
+    # Card
+    rect(s, Inches(1.1), y, Inches(11.8), Inches(1.55), fill=CARD, line=col)
+    txb(s, title, Inches(1.3), y + Inches(0.1), Inches(11.3), Inches(0.5),
+        size=20, bold=True, color=col)
+    txb(s, body,  Inches(1.3), y + Inches(0.6), Inches(11.3), Inches(0.85),
+        size=15, color=WHITE)
+
+    y += Inches(1.75)
+
+add_logo(s)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Slide 4 — Why did it take 45 minutes?
 # ═══════════════════════════════════════════════════════════════════════════════
 s = new_slide()
 accent_bar(s)
@@ -189,7 +232,7 @@ txb(s, "Why Did It Take 45 Minutes?",
 timeline = [
     ("0:00", RED,   "Alert fires. Engineers are paged."),
     ("0:05", AMBER, "Team opens spreadsheets and old Visio diagrams to find the secondary circuit."),
-    ("0:15", AMBER, "Secondary circuit details found — but which routers does it use?"),
+    ("0:15", AMBER, "Secondary circuit details found \u2014 but which routers does it use?"),
     ("0:22", AMBER, "Cross-reference IPAM, check interface logs, ask a colleague who \u201cknows the network\u201d."),
     ("0:30", AMBER, "SSH into Bristol router. Find the right interface. Apply config."),
     ("0:37", AMBER, "SSH into Atlanta router. Repeat."),
@@ -284,12 +327,12 @@ txb(s, "The NetBox + AAP world",
     Inches(5.5), Inches(1.25), Inches(7.2), Inches(0.5),
     size=18, bold=True, color=TEAL)
 new_items = [
-    ("NetBox Cloud", "Single source of truth for every circuit, device, and connection"),
-    ("Copilot AI", "Translate operator intent into precise API actions, no CLI needed"),
-    ("Event-driven webhook", "A status change in NetBox triggers automation instantly"),
-    ("AAP Controller", "Discovers the backup dynamically, pushes config, updates NetBox"),
-    ("Visual Explorer", "Live topology map reflects the new state immediately"),
-    ("Full audit trail", "Every change recorded in NetBox and AAP job history"),
+    ("1. Disable the failed circuit", "Copilot AI marks it offline in NetBox with a single sentence. No spreadsheet hunting."),
+    ("2. Fail over to the best alternative", "AAP queries NetBox, finds the highest-capacity backup, pushes router config automatically."),
+    ("3. Document for management", "AAP generates a full incident report: what failed, what ran, who triggered it, timestamps."),
+    ("", ""),
+    ("Visual Explorer", "Live topology map shows the new state the moment the workflow completes."),
+    ("Full audit trail", "Every action recorded in NetBox change log and AAP job history."),
 ]
 ny = Inches(1.9)
 for label, desc in new_items:
