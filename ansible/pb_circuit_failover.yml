@@ -81,6 +81,21 @@
         validate_certs: false
       register: primary_terms
 
+    - name: Debug terminations response
+      ansible.builtin.debug:
+        msg: "Terminations count={{ primary_terms.json.count }} results={{ primary_terms.json.results | map(attribute='term_side') | list }}"
+
+    - name: Assert terminations exist for both sides
+      ansible.builtin.assert:
+        that:
+          - primary_terms.json.results | selectattr('term_side', 'eq', 'A') | list | length > 0
+          - primary_terms.json.results | selectattr('term_side', 'eq', 'Z') | list | length > 0
+        fail_msg: >-
+          Circuit {{ failed_circuit }} (id={{ primary.id }}) is missing A/Z terminations in NetBox.
+          Found {{ primary_terms.json.count }} termination(s):
+          {{ primary_terms.json.results | map(attribute='term_side') | list }}.
+          Please add site terminations for this circuit in NetBox.
+
     - name: Set A-side and Z-side sites
       ansible.builtin.set_fact:
         a_side_site: "{{ (primary_terms.json.results | selectattr('term_side', 'eq', 'A') | first).termination }}"
