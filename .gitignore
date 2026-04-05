@@ -24,6 +24,5 @@ infra/keys/
 ansible/vars/infra.yml
 !ansible/vars/infra.yml.example
 
-# Slides — generated artefacts (rebuild with: uv run --with python-pptx python slides/make_deck.py)
+# Slides — rendered PNGs are generated from .mmd source, no need to commit
 slides/*.png
-slides/*.pptx
