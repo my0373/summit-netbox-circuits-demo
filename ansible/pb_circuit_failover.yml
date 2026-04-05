@@ -66,6 +66,10 @@
       ansible.builtin.set_fact:
         primary: "{{ failed_result.json.results[0] }}"
 
+    - name: Skip if circuit is not in a failed state
+      ansible.builtin.meta: end_play
+      when: primary.status.value not in ['offline', 'failed']
+
     # ── Discover sites from terminations ──────────────────────────────────────
 
     - name: Query circuit terminations
