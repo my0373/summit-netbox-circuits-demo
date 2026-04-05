@@ -27,7 +27,7 @@
   .field .val { color: #e2e8f0; font-weight: 500; }
   .badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 3px; font-size: 0.72rem; font-weight: 600; text-transform: uppercase; }
   .badge.active        { background: #052e16; color: #4ade80; }
-  .badge.deprovisioning { background: #450a0a; color: #fca5a5; }
+  .badge.offline { background: #450a0a; color: #fca5a5; }
   .router-list { list-style: none; }
   .router-list li { padding: 0.5rem 0.75rem; margin-bottom: 0.5rem; background: #0D1B2A; border-radius: 4px; font-size: 0.85rem; display: flex; justify-content: space-between; align-items: center; }
   .router-list .name { font-weight: 600; color: #00C2A8; }
@@ -79,7 +79,7 @@
       <div class="cid">{{ primary.cid }}</div>
       <div class="field"><span class="key">Provider</span><span class="val">{{ primary.provider.name }}</span></div>
       <div class="field"><span class="key">Type</span><span class="val">{{ primary.type.name }}</span></div>
-      <div class="field"><span class="key">Status</span><span class="val"><span class="badge deprovisioning">Deprovisioning</span></span></div>
+      <div class="field"><span class="key">Status</span><span class="val"><span class="badge offline">Deprovisioning</span></span></div>
       <div class="field"><span class="key">Committed Rate</span><span class="val">{{ primary.commit_rate // 1000 }} Mbps</span></div>
       <div class="field"><span class="key">A-side</span><span class="val">{{ primary_a_site }}</span></div>
       <div class="field"><span class="key">Z-side</span><span class="val">{{ primary_z_site }}</span></div>

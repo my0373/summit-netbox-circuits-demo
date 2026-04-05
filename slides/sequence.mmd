@@ -7,16 +7,16 @@ sequenceDiagram
     participant VE as Visual Explorer
     participant RS as Report Server
 
-    Presenter->>Copilot: "IPLC-GB-PH-PRI has failed —\nset it to deprovisioning"
-    Copilot->>NB: PATCH /circuits/circuits/{id}/\nstatus → deprovisioning
+    Presenter->>Copilot: "IPLC-GB-PH-PRI has failed —\nset it to offline"
+    Copilot->>NB: PATCH /circuits/circuits/{id}/\nstatus → offline
     NB-->>Copilot: 200 OK
-    NB->>EDA: Webhook POST\n{model: circuit, cid: IPLC-GB-PH-PRI,\nstatus: deprovisioning}
+    NB->>EDA: Webhook POST\n{model: circuit, cid: IPLC-GB-PH-PRI,\nstatus: offline}
     EDA->>AAP: run_job_template\nfailed_circuit=IPLC-GB-PH-PRI
     Note over AAP: Query NetBox for backup circuit
     AAP->>NB: GET circuits between GB-Bristol ↔ PH-Manila-01
     NB-->>AAP: IPLC-GB-PH-SEC (Meridian, 1 Gbps)
     Note over AAP: Simulate router config push
-    AAP->>NB: PATCH IPLC-GB-PH-PRI → deprovisioning
+    AAP->>NB: PATCH IPLC-GB-PH-PRI → offline
     AAP->>NB: PATCH IPLC-GB-PH-SEC → active
     AAP->>RS: Upload failover_report.html
     NB->>VE: Live map update\n(failed circuit removed)

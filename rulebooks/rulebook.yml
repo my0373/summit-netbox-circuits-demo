@@ -2,7 +2,7 @@
 # EDA Rulebook: NetBox Circuit Failover
 #
 # Listens for NetBox webhook events via an EDA event stream.
-# When a circuit tagged 'dd' is set to deprovisioning or failed,
+# When a circuit tagged 'dd' is set to offline or failed,
 # triggers the Circuit Failover job template in AAP controller.
 #
 # Event stream source: configured in EDA platform (HTTP endpoint).
@@ -17,10 +17,10 @@
 
   rules:
 
-    - name: Circuit set to deprovisioning — trigger failover
+    - name: Circuit set to offline — trigger failover
       condition: >
         event.payload.model == "circuit" and
-        event.payload.data.status.value == "deprovisioning"
+        event.payload.data.status.value == "offline"
       action:
         run_job_template:
           name: "Circuit Failover"

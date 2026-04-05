@@ -17,7 +17,7 @@ set -euo pipefail
 
 # ── Assume AWS role ───────────────────────────────────────────────────────────
 echo "Assuming AWS credentials (eu-west-2)..."
-eval "$(assume --region eu-west-2)" || {
+eval "$(GRANTED_ALIAS_INSTALLED=true assume --region eu-west-2)" || {
   echo "ERROR: 'assume --region eu-west-2' failed. Check your assume configuration."
   exit 1
 }

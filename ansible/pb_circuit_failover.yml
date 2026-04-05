@@ -4,14 +4,14 @@
 # Automated circuit failover driven by NetBox as the Source of Truth.
 #
 # Triggered by a NetBox webhook when a circuit status changes to
-# 'deprovisioning'. Can also be run manually for testing.
+# 'offline'. Can also be run manually for testing.
 #
 # What it does:
 #   1. Queries the failed circuit from NetBox
 #   2. Discovers the A/Z sites from circuit terminations
 #   3. Finds the best available backup circuit between the same sites
 #   4. Simulates router configuration updates (stub — no real device access)
-#   5. Updates NetBox: marks primary deprovisioning, backup active
+#   5. Updates NetBox: marks primary offline, backup active
 #   6. Generates an HTML failover report
 #
 # Usage (manual):
@@ -217,7 +217,7 @@
     # ── Update NetBox ─────────────────────────────────────────────────────────
     # These are real writes — this is what updates the Visual Explorer map.
 
-    - name: Mark failed circuit as deprovisioning in NetBox
+    - name: Mark failed circuit as offline in NetBox
       ansible.builtin.uri:
         url: "{{ netbox_url }}/api/circuits/circuits/{{ primary.id }}/"
         method: PATCH
@@ -226,7 +226,7 @@
           Content-Type: "application/json"
         body_format: json
         body:
-          status: "deprovisioning"
+          status: "offline"
         status_code: 200
       register: primary_update
 

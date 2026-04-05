@@ -214,7 +214,7 @@ txb(s, "Demo Flow — Step by Step",
 
 steps = [
     ("1", "Visual Explorer", "Open the global WAN map — GB-Bristol hub with active circuits to Manila, Tokyo, Bucharest, Managua, Sydney, Atlanta"),
-    ("2", "Copilot AI",      'Tell Copilot: "IPLC-GB-PH-PRI has failed — set it to deprovisioning"'),
+    ("2", "Copilot AI",      'Tell Copilot: "IPLC-GB-PH-PRI has failed — set it to offline"'),
     ("3", "EDA",             "NetBox webhook fires → EDA event stream → rulebook matches → triggers Circuit Failover job"),
     ("4", "AAP Controller",  "Queries NetBox for backup circuit (IPLC-GB-PH-SEC), simulates router config push, updates NetBox"),
     ("5", "Visual Explorer", "Refresh map — failed circuit line is gone, backup confirmed active"),
@@ -290,7 +290,7 @@ bullet_slide(s, "The Playbook: Driven Entirely by NetBox Data", [
     "Selects the best backup by highest committed bandwidth",
     "No hardcoded backup mappings — add a new circuit to NetBox and it is automatically considered",
     "Simulates router config push (stub tasks — real devices optional)",
-    "Writes back to NetBox: primary → deprovisioning, backup confirmed active",
+    "Writes back to NetBox: primary → offline, backup confirmed active",
     "Generates and publishes the HTML failover report",
 ])
 

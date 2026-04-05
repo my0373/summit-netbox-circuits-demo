@@ -71,7 +71,7 @@ data "aws_ami" "amazon_linux_2023" {
 
 resource "aws_security_group" "report_server" {
   name        = "RedhatSummitEDADemo-report-server"
-  description = "Summit demo report web server — HTTP redirect, HTTPS, non-standard SSH"
+  description = "Summit demo report web server - HTTP redirect, HTTPS, non-standard SSH"
 
   ingress {
     from_port   = 80
@@ -110,7 +110,7 @@ resource "aws_security_group" "report_server" {
 
 resource "aws_security_group" "mcp_server" {
   name        = "RedhatSummitEDADemo-mcp-server"
-  description = "Summit demo NetBox MCP server — non-standard SSH only (stdio over SSH)"
+  description = "Summit demo NetBox MCP server - non-standard SSH only (stdio over SSH)"
 
   ingress {
     from_port   = var.ssh_port
@@ -142,7 +142,7 @@ resource "aws_instance" "report_server" {
   })
 
   root_block_device {
-    volume_size = 8
+    volume_size = 30
     volume_type = "gp3"
 
     tags = {
@@ -167,7 +167,7 @@ resource "aws_instance" "mcp_server" {
   })
 
   root_block_device {
-    volume_size = 8
+    volume_size = 30
     volume_type = "gp3"
 
     tags = {

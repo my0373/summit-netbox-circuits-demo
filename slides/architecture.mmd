@@ -24,7 +24,7 @@ flowchart LR
         MCP["🔍 MCP Server\n(status confirm)"]
     end
 
-    WH -->|"circuit → deprovisioning"| ES
+    WH -->|"circuit → offline"| ES
     RB -->|"run_job_template"| JT
     PB -->|"PATCH circuit status"| NB2
     PB -->|"upload HTML"| RPT

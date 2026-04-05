@@ -32,7 +32,18 @@ import json
 import base64
 import argparse
 import requests
+from pathlib import Path
 from urllib.parse import urljoin
+
+# Auto-load .env from the project root so the script works without pre-sourcing
+_env_file = Path(__file__).parent / ".env"
+if _env_file.exists():
+    with open(_env_file) as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if _line and not _line.startswith("#") and "=" in _line:
+                _key, _, _val = _line.partition("=")
+                os.environ.setdefault(_key.strip(), _val.strip())
 
 # ── Configuration (all values loaded from environment — see .env) ──────────────
 
@@ -290,16 +301,30 @@ def main():
 
     # ── EDA: Decision Environment ──────────────────────────────────────────────
     section("EDA: Decision Environment")
-    de, _ = eda.get_or_create(
-        "/api/eda/v1/decision-environments/",
-        "Summit Demo DE",
-        {
-            "name": "Summit Demo DE",
-            "organization_id": ORG_ID,
-            "image_url": DE_IMAGE,
-            "description": "Decision environment for Summit NetBox circuit failover demo",
-        },
-    )
+    # Prefer an existing DE over creating a new one — the AAP instance may not
+    # have access to pull quay.io images directly.
+    all_des = eda.get("/api/eda/v1/decision-environments/")
+    existing_des = all_des.get("results", [])
+    # Look for our own DE first, then fall back to any available DE
+    de = next((d for d in existing_des if d["name"] == "Summit Demo DE"), None)
+    if de is None and existing_des:
+        de = existing_des[0]
+        print(f"  Using existing DE: {de['name']} (id={de['id']})")
+    elif de is None:
+        # No DEs at all — create one and hope the image is accessible
+        de, _ = eda.get_or_create(
+            "/api/eda/v1/decision-environments/",
+            "Summit Demo DE",
+            {
+                "name": "Summit Demo DE",
+                "organization_id": ORG_ID,
+                "image_url": DE_IMAGE,
+                "description": "Decision environment for Summit NetBox circuit failover demo",
+            },
+        )
+        print(f"  Created DE: {de['name']} (id={de['id']})")
+    else:
+        print(f"  Found existing DE: {de['name']} (id={de['id']})")
     de_id = de["id"]
 
     # ── EDA: Project ───────────────────────────────────────────────────────────
@@ -476,7 +501,7 @@ def main():
             "and": [
                 {
                     "attr": "data.status.value",
-                    "value": ["deprovisioning", "failed"],
+                    "value": ["offline", "failed"],
                     "op": "in"
                 }
             ]
@@ -493,10 +518,15 @@ def main():
             print(f"  ERROR creating webhook: {resp.status_code} — {resp.text[:300]}")
     else:
         wh = existing["results"][0]
-        # Update it to ensure it points to the right URL
+        # Update it to ensure URL, conditions, and auth are current
         resp = nb_session.patch(
             f"{NETBOX_URL}/api/extras/webhooks/{wh['id']}/",
-            json={"payload_url": es_webhook_url, "enabled": True},
+            json={
+                "payload_url": es_webhook_url,
+                "enabled": True,
+                "conditions": webhook_data["conditions"],
+                "additional_headers": webhook_data["additional_headers"],
+            },
         )
         print(f"  EXISTS/UPDATED NetBox webhook [{wh['id']}]")
 
@@ -522,11 +552,11 @@ def main():
   NetBox Webhook:
     URL:    {es_webhook_url}
     Token:  {EVENT_STREAM_TOKEN}
-    Trigger: circuit update → status in [deprovisioning, failed]
+    Trigger: circuit update → status in [offline, failed]
 
   Demo flow:
     1. Open Visual Explorer in NetBox — show global WAN map
-    2. Use Copilot: "Set IPLC-GB-PH-PRI to deprovisioning — primary link failed"
+    2. Use Copilot: "Set IPLC-GB-PH-PRI to offline — primary link failed"
     3. EDA receives event → triggers Circuit Failover job template
     4. AAP: discovers backup, updates router config (simulated), updates NetBox
     5. Visual Explorer updates — failed circuit gone, backup confirmed active
