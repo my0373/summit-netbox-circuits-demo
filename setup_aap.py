@@ -273,6 +273,84 @@ def main():
         })
         print(f"  Attached NetBox credential to Circuit Failover template")
 
+    # ── Controller: Job Template — Deploy Report ──────────────────────────────
+    section("Controller: Job Template — Deploy Report")
+    jt_report, _ = ctrl.get_or_create(
+        "/api/controller/v2/job_templates/",
+        "Deploy Report",
+        {
+            "name": "Deploy Report",
+            "organization": ORG_ID,
+            "inventory": inv_id,
+            "project": proj_id,
+            "playbook": "ansible/pb_deploy_report.yml",
+            "job_type": "run",
+            "ask_variables_on_launch": True,
+            "extra_vars": "failed_circuit: IPLC-GB-PH-PRI",
+            "description": "Generates and deploys the HTML failover report to the report web server.",
+        },
+    )
+    jt_report_id = jt_report["id"]
+
+    existing_creds = ctrl.get(f"/api/controller/v2/job_templates/{jt_report_id}/credentials/")
+    cred_ids = [c["id"] for c in existing_creds.get("results", [])]
+    if netbox_cred["id"] not in cred_ids:
+        ctrl.post(f"/api/controller/v2/job_templates/{jt_report_id}/credentials/", {
+            "id": netbox_cred["id"], "associate": True,
+        })
+        print(f"  Attached NetBox credential to Deploy Report template")
+
+    # Attach machine credential (SSH to report server) if available
+    machine_creds = ctrl.get("/api/controller/v2/credentials/?credential_type__name=Machine")
+    machine_cred = next(
+        (c for c in machine_creds.get("results", []) if "Report Server" in c["name"]),
+        None
+    )
+    if machine_cred and machine_cred["id"] not in cred_ids:
+        ctrl.post(f"/api/controller/v2/job_templates/{jt_report_id}/credentials/", {
+            "id": machine_cred["id"], "associate": True,
+        })
+        print(f"  Attached SSH credential to Deploy Report template")
+
+    # ── Controller: Workflow Template — Circuit Failover Workflow ─────────────
+    section("Controller: Workflow Template — Circuit Failover Workflow")
+    wf, wf_created = ctrl.get_or_create(
+        "/api/controller/v2/workflow_job_templates/",
+        "Circuit Failover Workflow",
+        {
+            "name": "Circuit Failover Workflow",
+            "organization": ORG_ID,
+            "description": "Automated WAN circuit failover: updates NetBox and deploys the incident report.",
+            "ask_variables_on_launch": True,
+            "extra_vars": "failed_circuit: IPLC-GB-PH-PRI",
+        },
+    )
+    wf_id = wf["id"]
+
+    if wf_created:
+        # Add Node 1: Circuit Failover
+        node1 = ctrl.post(
+            f"/api/controller/v2/workflow_job_templates/{wf_id}/workflow_nodes/",
+            {"unified_job_template": jt_failover_id, "inventory": inv_id},
+        )
+        node1_id = node1["id"]
+        print(f"  Added node 1: Circuit Failover [{node1_id}]")
+
+        # Add Node 2: Deploy Report
+        node2 = ctrl.post(
+            f"/api/controller/v2/workflow_job_templates/{wf_id}/workflow_nodes/",
+            {"unified_job_template": jt_report_id, "inventory": inv_id},
+        )
+        node2_id = node2["id"]
+        print(f"  Added node 2: Deploy Report [{node2_id}]")
+
+        # Link Node 1 → Node 2 on success
+        ctrl.post(
+            f"/api/controller/v2/workflow_job_template_nodes/{node1_id}/success_nodes/",
+            {"id": node2_id},
+        )
+        print(f"  Linked: Circuit Failover → Deploy Report (on success)")
+
     # ── Controller: Job Template — Reset Demo ─────────────────────────────────
     section("Controller: Job Template — Reset Demo")
     jt_reset, _ = ctrl.get_or_create(
@@ -460,19 +538,12 @@ def main():
         print("  SKIPPED — no rulebook found. Re-run after project sync.")
         act_id = None
 
-    # ── Refresh event stream to get URL ───────────────────────────────────────
-    section("EDA: Event Stream Webhook URL")
-    es_detail = eda.get(f"/api/eda/v1/event-streams/{es_id}/")
-    es_webhook_url = es_detail.get("url", "")
-
-    if not es_webhook_url:
-        es_webhook_url = f"{AAP_HOST}/api/eda/v1/event-streams/{es_id}/post/"
-
-    print(f"  Webhook URL: {es_webhook_url}")
-    print(f"  Token header: Authorization: Token {EVENT_STREAM_TOKEN}")
-
-    # ── NetBox: Webhook ────────────────────────────────────────────────────────
-    section("NetBox: Webhook Configuration")
+    # ── NetBox: Webhook + Event Rule ──────────────────────────────────────────
+    # NetBox 4.x uses Event Rules to trigger webhooks. The webhook object holds
+    # the HTTP endpoint config; the event rule determines when it fires.
+    #
+    # Flow: NetBox circuit update → event rule → webhook → AAP workflow launch
+    section("NetBox: Webhook + Event Rule")
 
     nb_session = requests.Session()
     nb_session.headers.update({
@@ -480,55 +551,80 @@ def main():
         "Content-Type": "application/json",
     })
 
-    # Check for existing webhook
-    existing = nb_session.get(
-        f"{NETBOX_URL}/api/extras/webhooks/",
-        params={"name": "EDA Circuit Failover"},
-    ).json()
+    # AAP controller token for authenticating the workflow launch request
+    aap_token = os.getenv("AAP_TOKEN", "")
+    workflow_launch_url = f"{AAP_HOST}/api/controller/v2/workflow_job_templates/{wf_id}/launch/"
 
+    webhook_name = "AAP Circuit Failover"
     webhook_data = {
-        "name": "EDA Circuit Failover",
-        "payload_url": es_webhook_url,
+        "name": webhook_name,
+        "payload_url": workflow_launch_url,
         "http_method": "POST",
         "http_content_type": "application/json",
-        "additional_headers": f"Authorization: Token {EVENT_STREAM_TOKEN}",
-        "body_template": "",
+        "additional_headers": f"Authorization: Bearer {aap_token}",
+        "body_template": '{"extra_vars": {"failed_circuit": "{{ data.cid }}"}}',
         "enabled": True,
-        "type_create": False,
-        "type_update": True,
-        "type_delete": False,
-        "conditions": {
-            "and": [
-                {
-                    "attr": "data.status.value",
-                    "value": ["offline", "failed"],
-                    "op": "in"
-                }
-            ]
-        },
-        "content_types": ["circuits.circuit"],
+        "ssl_verification": False,
     }
 
-    if existing["count"] == 0:
+    # Create or update the webhook object
+    existing_wh = nb_session.get(
+        f"{NETBOX_URL}/api/extras/webhooks/",
+        params={"name": webhook_name},
+    ).json()
+
+    if existing_wh["count"] == 0:
         resp = nb_session.post(f"{NETBOX_URL}/api/extras/webhooks/", json=webhook_data)
         if resp.status_code == 201:
-            print(f"  CREATED NetBox webhook: EDA Circuit Failover")
-            print(f"  Webhook ID: {resp.json()['id']}")
+            wh_id = resp.json()["id"]
+            print(f"  CREATED webhook: {webhook_name} [{wh_id}]")
         else:
             print(f"  ERROR creating webhook: {resp.status_code} — {resp.text[:300]}")
+            wh_id = None
     else:
-        wh = existing["results"][0]
-        # Update it to ensure URL, conditions, and auth are current
-        resp = nb_session.patch(
-            f"{NETBOX_URL}/api/extras/webhooks/{wh['id']}/",
-            json={
-                "payload_url": es_webhook_url,
+        wh = existing_wh["results"][0]
+        wh_id = wh["id"]
+        nb_session.patch(f"{NETBOX_URL}/api/extras/webhooks/{wh_id}/", json={
+            "payload_url": workflow_launch_url,
+            "additional_headers": webhook_data["additional_headers"],
+            "body_template": webhook_data["body_template"],
+            "enabled": True,
+            "ssl_verification": False,
+        })
+        print(f"  EXISTS/UPDATED webhook [{wh_id}]: {webhook_name}")
+
+    # Create or update the event rule that triggers the webhook
+    if wh_id:
+        event_rule_name = "AAP Circuit Failover"
+        existing_er = nb_session.get(
+            f"{NETBOX_URL}/api/extras/event-rules/",
+            params={"name": event_rule_name},
+        ).json()
+
+        er_data = {
+            "name": event_rule_name,
+            "enabled": True,
+            "object_types": ["circuits.circuit"],
+            "event_types": ["object_updated"],
+            "conditions": None,
+            "action_type": "webhook",
+            "action_object_type": "extras.webhook",
+            "action_object_id": wh_id,
+        }
+
+        if existing_er["count"] == 0:
+            resp = nb_session.post(f"{NETBOX_URL}/api/extras/event-rules/", json=er_data)
+            if resp.status_code == 201:
+                print(f"  CREATED event rule: {event_rule_name} [{resp.json()['id']}]")
+            else:
+                print(f"  ERROR creating event rule: {resp.status_code} — {resp.text[:300]}")
+        else:
+            er = existing_er["results"][0]
+            nb_session.patch(f"{NETBOX_URL}/api/extras/event-rules/{er['id']}/", json={
                 "enabled": True,
-                "conditions": webhook_data["conditions"],
-                "additional_headers": webhook_data["additional_headers"],
-            },
-        )
-        print(f"  EXISTS/UPDATED NetBox webhook [{wh['id']}]")
+                "action_object_id": wh_id,
+            })
+            print(f"  EXISTS/UPDATED event rule [{er['id']}]: {event_rule_name}")
 
     # ── Summary ────────────────────────────────────────────────────────────────
     section("Setup Complete — Summary")
@@ -539,28 +635,28 @@ def main():
     Inventory:       {inventory['name']} (id={inv_id})
     Project:         Summit NetBox Circuits Demo (id={proj_id})
     JT Failover:     Circuit Failover (id={jt_failover_id})
+    JT Report:       Deploy Report (id={jt_report_id})
+    Workflow:        Circuit Failover Workflow (id={wf_id})
     JT Reset:        Reset Demo (id={jt_reset_id})
 
-  EDA Resources:
-    Decision Env:    Summit Demo DE (id={de_id})
-    EDA Project:     Summit NetBox Circuits Demo (id={eda_proj_id})
-    AAP Cred:        AAP Controller - Summit Demo (id={aap_cred_id})
-    Stream Cred:     NetBox Webhook Token (id={stream_cred_id})
-    Event Stream:    NetBox Circuit Events (id={es_id})
-    Activation:      {"NetBox Circuit Failover (id=" + str(act_id) + ")" if act_id else "NOT CREATED — re-run after project sync"}
-
-  NetBox Webhook:
-    URL:    {es_webhook_url}
-    Token:  {EVENT_STREAM_TOKEN}
-    Trigger: circuit update → status in [offline, failed]
+  NetBox Integration:
+    Webhook:         AAP Circuit Failover → {workflow_launch_url}
+    Event Rule:      AAP Circuit Failover (fires on circuit update)
+    Body template:   failed_circuit extracted from {{ data.cid }}
+    Note: Playbook guards against spurious triggers — only runs if
+          circuit is actually in offline/failed state.
 
   Demo flow:
     1. Open Visual Explorer in NetBox — show global WAN map
     2. Use Copilot: "Set IPLC-GB-PH-PRI to offline — primary link failed"
-    3. EDA receives event → triggers Circuit Failover job template
-    4. AAP: discovers backup, updates router config (simulated), updates NetBox
-    5. Visual Explorer updates — failed circuit gone, backup confirmed active
-    6. Reset: run ./reset.sh or launch Reset Demo job template in AAP
+    3. NetBox event rule fires → workflow launched in AAP
+    4. Step 1 (Circuit Failover): discovers backup, simulates router
+       config push, updates NetBox (primary offline, backup active)
+    5. Step 2 (Deploy Report): re-queries NetBox, generates HTML report,
+       deploys to report web server
+    6. Visual Explorer updates — failed circuit gone, backup confirmed active
+    7. Open report URL to see full incident summary
+    8. Reset: run ./reset.sh or launch Reset Demo job template in AAP
 """)
 
 
