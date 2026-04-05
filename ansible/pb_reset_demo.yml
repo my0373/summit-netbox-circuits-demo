@@ -1,19 +1,34 @@
 ---
 # pb_reset_demo.yml
 #
-# Resets all demo circuits back to 'active' status in NetBox.
-# Run this between demo runs to restore the starting state.
+# Resets the demo circuits in NetBox to their starting state:
+#   - IPLC-GB-AT-PRI → active   (the circuit that "fails" in the demo)
+#   - IPLC-GB-AT-SEC → offline  (the backup, brought online by automation)
+#   - All other dd-tagged circuits → offline
 #
 # Usage:
 #   ansible-playbook ansible/pb_reset_demo.yml
 
-- name: Reset demo circuits to active
+- name: Reset demo circuits
   hosts: localhost
   connection: local
   gather_facts: false
 
   vars_files:
     - vars/netbox_creds.yml
+
+  vars:
+    primary_circuit: "IPLC-GB-AT-PRI"
+    offline_circuits:
+      - IPLC-GB-AT-SEC
+      - IPLC-GB-PH-PRI
+      - IPLC-GB-PH-SEC
+      - IPLC-GB-PH-DR
+      - MPLS-GB-PH-01
+      - DIA-PH-MNL-01
+      - TRANSIT-PH-MNL-01
+      - IPLC-NI-PH-PRI
+      - IPLC-PH-JP-PRI
 
   tasks:
 
@@ -25,24 +40,20 @@
         return_content: true
       register: all_circuits
 
-    - name: Find circuits that are not active (need resetting)
+    # ── Set primary circuit active ─────────────────────────────────────────────
+
+    - name: Find primary circuit
       ansible.builtin.set_fact:
-        circuits_to_reset: >-
+        primary: >-
           {{
             all_circuits.json.results
-            | rejectattr('status.value', 'eq', 'active')
-            | list
+            | selectattr('cid', 'eq', primary_circuit)
+            | first
           }}
 
-    - name: Report what will be reset
-      ansible.builtin.debug:
-        msg: >-
-          Found {{ circuits_to_reset | length }} circuit(s) to reset:
-          {{ circuits_to_reset | map(attribute='cid') | join(', ') | default('none') }}
-
-    - name: Reset circuits to active
+    - name: Set primary circuit to active
       ansible.builtin.uri:
-        url: "{{ netbox_url }}/api/circuits/circuits/{{ item.id }}/"
+        url: "{{ netbox_url }}/api/circuits/circuits/{{ primary.id }}/"
         method: PATCH
         headers:
           Authorization: "Token {{ netbox_token }}"
@@ -51,40 +62,32 @@
         body:
           status: "active"
         status_code: 200
-      loop: "{{ circuits_to_reset }}"
-      loop_control:
-        label: "{{ item.cid }}"
-      register: reset_results
+      when: primary.status.value != 'active'
+      register: primary_result
 
-    - name: Confirm reset
+    - name: Confirm primary circuit status
       ansible.builtin.debug:
-        msg: "{{ item.item.cid }}: {{ item.item.status.label }} → {{ item.json.status.label }}"
-      loop: "{{ reset_results.results }}"
-      loop_control:
-        label: "{{ item.item.cid }}"
-      when: reset_results.results | length > 0
+        msg: "{{ primary_circuit }}: {{ primary.status.label }}{{ ' → Active' if primary.status.value != 'active' else ' (already active)' }}"
 
-    # ── Set Bristol–Manila circuits offline ───────────────────────────────────
-    # The demo uses Bristol–Atlanta. The GB-PH circuits should show as offline
-    # so the Visual Explorer map focuses on the correct topology.
+    # ── Set specified circuits offline ─────────────────────────────────────────
 
-    - name: Find Bristol–Manila circuits to set offline
+    - name: Build list of circuits to set offline (skipping any already offline)
       ansible.builtin.set_fact:
-        ph_circuits: >-
+        circuits_to_offline: >-
           {{
             all_circuits.json.results
-            | selectattr('cid', 'match', '.*-PH-.*|MPLS-GB-PH.*')
+            | selectattr('cid', 'in', offline_circuits)
             | rejectattr('status.value', 'eq', 'offline')
             | list
           }}
 
-    - name: Report Bristol–Manila circuits being set offline
+    - name: Report circuits being set offline
       ansible.builtin.debug:
         msg: >-
-          Setting {{ ph_circuits | length }} Bristol–Manila circuit(s) to offline:
-          {{ ph_circuits | map(attribute='cid') | join(', ') | default('none') }}
+          Setting {{ circuits_to_offline | length }} circuit(s) to offline:
+          {{ circuits_to_offline | map(attribute='cid') | join(', ') | default('none — all already offline') }}
 
-    - name: Set Bristol–Manila circuits to offline
+    - name: Set circuits to offline
       ansible.builtin.uri:
         url: "{{ netbox_url }}/api/circuits/circuits/{{ item.id }}/"
         method: PATCH
@@ -95,14 +98,14 @@
         body:
           status: "offline"
         status_code: 200
-      loop: "{{ ph_circuits }}"
+      loop: "{{ circuits_to_offline }}"
       loop_control:
         label: "{{ item.cid }}"
 
     - name: All done
       ansible.builtin.debug:
         msg: >-
-          Demo reset complete.
-          {{ circuits_to_reset | length }} circuit(s) restored to Active.
-          {{ ph_circuits | length }} Bristol–Manila circuit(s) set to Offline.
+          Reset complete.
+          {{ primary_circuit }} is Active.
+          {{ circuits_to_offline | length }} circuit(s) set to Offline.
           NetBox and Visual Explorer are back to starting state.
