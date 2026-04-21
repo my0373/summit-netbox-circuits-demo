@@ -26,3 +26,9 @@ ansible/vars/infra.yml
 
 # Slides — rendered PNGs are generated from .mmd source, no need to commit
 slides/*.png
+
+# Installed collections (downloaded via ansible-galaxy)
+collections/ansible_collections/
+
+# Temporary files
+tmp/

@@ -25,12 +25,14 @@
   tasks:
 
     - name: Fetch all circuits tagged 'dd'
-      ansible.builtin.uri:
-        url: "{{ netbox_url }}/api/circuits/circuits/?tag=dd&limit=100"
-        headers:
-          Authorization: "Token {{ netbox_token }}"
-        return_content: true
-      register: all_circuits
+      ansible.builtin.set_fact:
+        all_circuits: >-
+          {{ query('netbox.netbox.nb_lookup', 'circuits',
+                   api_endpoint=netbox_url,
+                   token=netbox_token,
+                   api_filter='tag=dd',
+                   validate_certs=netbox_validate_certs,
+                   raw_data=true) }}
 
     # ── Set all dd-tagged circuits to active ──────────────────────────────────
 
@@ -38,23 +40,21 @@
       ansible.builtin.set_fact:
         circuits_to_activate: >-
           {{
-            all_circuits.json.results
+            all_circuits
             | rejectattr('status.value', 'eq', 'active')
             | rejectattr('cid', 'in', offline_circuits)
             | list
           }}
 
     - name: Restore all other circuits to active
-      ansible.builtin.uri:
-        url: "{{ netbox_url }}/api/circuits/circuits/{{ item.id }}/"
-        method: PATCH
-        headers:
-          Authorization: "Token {{ netbox_token }}"
-          Content-Type: "application/json"
-        body_format: json
-        body:
-          status: "active"
-        status_code: 200
+      netbox.netbox.netbox_circuit:
+        netbox_url: "{{ netbox_url }}"
+        netbox_token: "{{ netbox_token }}"
+        validate_certs: "{{ netbox_validate_certs }}"
+        data:
+          cid: "{{ item.cid }}"
+          status: "Active"
+        state: present
       loop: "{{ circuits_to_activate }}"
       loop_control:
         label: "{{ item.cid }}"
@@ -65,28 +65,27 @@
       ansible.builtin.set_fact:
         primary: >-
           {{
-            all_circuits.json.results
+            all_circuits
             | selectattr('cid', 'eq', primary_circuit)
             | first
           }}
 
     - name: Set primary circuit to active
-      ansible.builtin.uri:
-        url: "{{ netbox_url }}/api/circuits/circuits/{{ primary.id }}/"
-        method: PATCH
-        headers:
-          Authorization: "Token {{ netbox_token }}"
-          Content-Type: "application/json"
-        body_format: json
-        body:
-          status: "active"
-        status_code: 200
+      netbox.netbox.netbox_circuit:
+        netbox_url: "{{ netbox_url }}"
+        netbox_token: "{{ netbox_token }}"
+        validate_certs: "{{ netbox_validate_certs }}"
+        data:
+          cid: "{{ primary.cid }}"
+          status: "Active"
+        state: present
       when: primary.status.value != 'active'
       register: primary_result
 
     - name: Confirm primary circuit status
       ansible.builtin.debug:
         msg: "{{ primary_circuit }}: {{ primary.status.label }}{{ ' → Active' if primary.status.value != 'active' else ' (already active)' }}"
+        verbosity: 0
 
     # ── Set specified circuits offline ─────────────────────────────────────────
 
@@ -94,7 +93,7 @@
       ansible.builtin.set_fact:
         circuits_to_offline: >-
           {{
-            all_circuits.json.results
+            all_circuits
             | selectattr('cid', 'in', offline_circuits)
             | rejectattr('status.value', 'eq', 'offline')
             | list
@@ -105,18 +104,17 @@
         msg: >-
           Setting {{ circuits_to_offline | length }} circuit(s) to offline:
           {{ circuits_to_offline | map(attribute='cid') | join(', ') | default('none — all already offline') }}
+        verbosity: 0
 
     - name: Set circuits to offline
-      ansible.builtin.uri:
-        url: "{{ netbox_url }}/api/circuits/circuits/{{ item.id }}/"
-        method: PATCH
-        headers:
-          Authorization: "Token {{ netbox_token }}"
-          Content-Type: "application/json"
-        body_format: json
-        body:
-          status: "offline"
-        status_code: 200
+      netbox.netbox.netbox_circuit:
+        netbox_url: "{{ netbox_url }}"
+        netbox_token: "{{ netbox_token }}"
+        validate_certs: "{{ netbox_validate_certs }}"
+        data:
+          cid: "{{ item.cid }}"
+          status: "Offline"
+        state: present
       loop: "{{ circuits_to_offline }}"
       loop_control:
         label: "{{ item.cid }}"
@@ -128,3 +126,4 @@
           {{ primary_circuit }} is Active. IPLC-GB-AT-SEC is Offline.
           {{ circuits_to_activate | length }} other circuit(s) restored to Active.
           NetBox and Visual Explorer are back to starting state.
+        verbosity: 0
