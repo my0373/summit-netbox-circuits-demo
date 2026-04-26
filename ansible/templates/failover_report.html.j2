@@ -79,7 +79,7 @@
       <div class="cid">{{ primary.cid }}</div>
       <div class="field"><span class="key">Provider</span><span class="val">{{ primary.provider.name }}</span></div>
       <div class="field"><span class="key">Type</span><span class="val">{{ primary.type.name }}</span></div>
-      <div class="field"><span class="key">Status</span><span class="val"><span class="badge offline">Deprovisioning</span></span></div>
+      <div class="field"><span class="key">Status</span><span class="val"><span class="badge offline">{% if primary.status.value == 'deprovisioning' %}Offline{% else %}{{ primary.status.label }}{% endif %}</span></span></div>
       <div class="field"><span class="key">Committed Rate</span><span class="val">{{ primary.commit_rate // 1000 }} Mbps</span></div>
       <div class="field"><span class="key">A-side</span><span class="val">{{ primary_a_site }}</span></div>
       <div class="field"><span class="key">Z-side</span><span class="val">{{ primary_z_site }}</span></div>
@@ -149,7 +149,7 @@
 
     <div class="step detect">
       <h3>Circuit failure detected</h3>
-      <p>NetBox Copilot set <strong>{{ primary.cid }}</strong> to Deprovisioning.
+      <p>NetBox Copilot set <strong>{{ primary.cid }}</strong> to {% if primary.status.value == 'deprovisioning' %}Offline{% else %}{{ primary.status.label }}{% endif %}.
          Webhook fired to Ansible Automation Platform.</p>
     </div>
 
@@ -178,7 +178,7 @@ end</div>
     <div class="step update">
       <h3>NetBox Source of Truth updated</h3>
       <p>
-        <strong>{{ primary.cid }}</strong> marked as Deprovisioning.
+        <strong>{{ primary.cid }}</strong> marked as {% if primary.status.value == 'deprovisioning' %}Offline{% else %}{{ primary.status.label }}{% endif %}.
         Visual Explorer WAN map updated in real-time.
         Full change log recorded in NetBox.
       </p>

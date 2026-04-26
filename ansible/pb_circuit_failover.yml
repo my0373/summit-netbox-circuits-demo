@@ -72,7 +72,7 @@
 
     - name: Skip if circuit is not in a failed state
       ansible.builtin.meta: end_play
-      when: primary.status.value not in ['offline', 'failed', 'deprovisioning']
+      when: primary.status.value not in ['offline', 'failed']
 
     # ── Discover sites from terminations ──────────────────────────────────────
 

@@ -43,15 +43,3 @@
           job_args:
             extra_vars:
               failed_circuit: "{{ event.payload.data.cid }}"
-
-    - name: Circuit set to deprovisioning — trigger failover workflow
-      condition: >
-        event.payload.object_type == "circuits.circuit" and
-        event.payload.data.status.value == "deprovisioning"
-      action:
-        run_workflow_template:
-          name: "Circuit Failover Workflow"
-          organization: "Default"
-          job_args:
-            extra_vars:
-              failed_circuit: "{{ event.payload.data.cid }}"
