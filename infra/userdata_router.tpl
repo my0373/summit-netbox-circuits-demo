@@ -4,7 +4,7 @@ ip domain-name demo.netboxlabs.com
 username iosuser privilege 15 secret ${router_password}
 ip ssh version 2
 ip ssh server algorithm hostkey rsa-sha2-512 rsa-sha2-256
-ip ssh server algorithm publickey rsa-sha2-512 rsa-sha2-256 ssh-ed25519 ecdsa-sha2-nistp256 ecdsa-sha2-nistp384 ecdsa-sha2-nistp521
+ip ssh server algorithm authentication password
 line vty 0 4
  transport input ssh
  login local
