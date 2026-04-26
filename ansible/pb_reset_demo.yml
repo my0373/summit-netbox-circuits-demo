@@ -167,22 +167,33 @@
 - name: Restore primary default route on router
   hosts: cisco_reset_routers
   gather_facts: false
+  ignore_unreachable: true
 
   tasks:
 
-    - name: Remove backup route and restore primary route
-      cisco.ios.ios_config:
-        lines:
-          - "no ip route 0.0.0.0 0.0.0.0 {{ hostvars[inventory_hostname]['backup_gw'] }}"
-          - "ip route 0.0.0.0 0.0.0.0 {{ hostvars[inventory_hostname]['primary_gw'] }}"
-        save_when: changed
+    - name: Reset router config (best-effort — failures don't stop the reset)
+      block:
+        - name: Remove backup route and restore primary route
+          cisco.ios.ios_config:
+            lines:
+              - "no ip route 0.0.0.0 0.0.0.0 {{ hostvars[inventory_hostname]['backup_gw'] }}"
+              - "ip route 0.0.0.0 0.0.0.0 {{ hostvars[inventory_hostname]['primary_gw'] }}"
+            save_when: changed
 
-    - name: Verify primary route is active
-      cisco.ios.ios_command:
-        commands:
-          - show ip route 0.0.0.0
-      register: route_check
+        - name: Verify primary route is active
+          cisco.ios.ios_command:
+            commands:
+              - show ip route 0.0.0.0
+          register: route_check
 
-    - name: Confirm route restored
-      ansible.builtin.debug:
-        msg: "{{ route_check.stdout_lines }}"
+        - name: Confirm route restored
+          ansible.builtin.debug:
+            msg: "{{ route_check.stdout_lines }}"
+      rescue:
+        - name: Router reset failed — NetBox is reset, router still on backup route
+          ansible.builtin.debug:
+            msg: >-
+              Router config reset on {{ inventory_hostname }} failed
+              ({{ ansible_failed_result.msg | default('unknown') }}).
+              NetBox is back to starting state but the router config
+              was not reverted — investigate the SSH algorithm issue.
