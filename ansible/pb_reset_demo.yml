@@ -151,7 +151,7 @@
         ansible_password: "{{ router_password }}"
         ansible_network_os: cisco.ios.ios
         ansible_connection: ansible.netcommon.network_cli
-        ansible_network_cli_ssh_type: libssh
+        ansible_network_cli_ssh_type: paramiko
         ansible_become: true
         ansible_become_method: enable
         ansible_host_key_checking: false
