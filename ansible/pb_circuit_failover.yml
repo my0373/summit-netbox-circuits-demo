@@ -352,7 +352,8 @@
           Failover complete for {{ failed_circuit }}
             Primary:  {{ primary.cid }} -> Offline
             Backup:   {{ backup.cid }} ({{ backup.provider.name }}, {{ backup.commit_rate // 1000 }} Mbps)
-            Routers:  config pushed to {{ all_routers | map(attribute='name') | join(', ') }}
+            Live config push: {{ all_routers | selectattr('is_real') | map(attribute='name') | join(', ') | default('none', true) }}
+            Simulated:        {{ all_routers | rejectattr('is_real') | map(attribute='name') | join(', ') | default('none', true) }}
           Report will be generated and deployed by the next workflow step.
 
 # ── Play 2: Push failover config to reachable routers ────────────────────────

@@ -136,7 +136,7 @@
 {% for r in routers %}
     <li>
       <span class="name">{{ r.name }}</span>
-      <span class="site">{{ r.site.name }}</span>
+      <span class="site">{{ r.site }} · {{ r.interface }}</span>
     </li>
 {% endfor %}
   </ul>
