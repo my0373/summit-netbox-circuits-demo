@@ -161,18 +161,21 @@
 
     <div class="step push">
       <h3>Router configuration updated</h3>
-      <p>Failover route pushed to <strong>{{ routers[0].name }}</strong> ({{ routers[0].site.name }}):</p>
+      <p>Routers identified via NetBox cable connections:</p>
+{% for r in routers %}
+      <p style="margin-top: 0.75rem;">
+        <strong>{{ r.name }}</strong>
+        <span style="color: #B0BCCC;">({{ r.site }} · {{ r.interface }})</span>
+        — {{ r.circuit }} {{ r.side }}-side
+        {% if r.is_real %}<span style="color: #00C2A8;">[live config push]</span>{% else %}<span style="color: #B0BCCC;">[simulated]</span>{% endif %}
+      </p>
+{% if r.is_real and r.role == 'backup' %}
       <div class="cmd">conf t
 no ip route 0.0.0.0 0.0.0.0 172.16.0.1   ! remove primary default route
 ip route 0.0.0.0 0.0.0.0 172.16.1.1       ! activate backup route
 end</div>
-{% if routers | length > 1 %}
-      <p style="margin-top: 0.75rem;">And to <strong>{{ routers[1].name }}</strong> ({{ routers[1].site.name }}):</p>
-      <div class="cmd">conf t
-no ip route 0.0.0.0 0.0.0.0 172.16.0.2
-ip route 0.0.0.0 0.0.0.0 172.16.1.2
-end</div>
 {% endif %}
+{% endfor %}
     </div>
 
     <div class="step update">

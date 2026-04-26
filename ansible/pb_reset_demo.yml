@@ -134,22 +134,54 @@
           {{ circuits_to_activate | length }} other circuit(s) restored to Active.
           NetBox and Visual Explorer are back to starting state.
 
-    # ── Register A-side router for route reset ────────────────────────────────
+    # ── Discover routers via cable connections (NetBox SoT) ───────────────────
+    # The same primary circuit we activate above has its A-side termination
+    # connected via a cable to a router interface. Follow that cable to find
+    # the live router that needs its config reverted.
 
-    - name: Query A-side router at GB-Bristol
+    - name: Query primary circuit terminations (for cable discovery)
       ansible.builtin.uri:
-        url: "{{ netbox_url }}/api/dcim/devices/?site=gb-bristol&role=router&tag=dd&limit=1"
+        url: "{{ netbox_url }}/api/circuits/circuit-terminations/?circuit_id={{ primary.id }}"
         headers:
           Authorization: "Token {{ netbox_token }}"
         return_content: true
         validate_certs: false
-      register: brs_routers
+      register: primary_terms
 
-    - name: Register router in dynamic inventory for route reset
+    - name: Build router descriptors from primary circuit cables
+      ansible.builtin.set_fact:
+        cable_routers: "{{ cable_routers | default([]) + [router_entry] }}"
+      vars:
+        peer: "{{ item.link_peers[0] }}"
+        router_entry:
+          side: "{{ item.term_side }}"
+          name: "{{ peer.device.name }}"
+          id: "{{ peer.device.id }}"
+          interface: "{{ peer.name }}"
+      loop: "{{ primary_terms.json.results }}"
+      loop_control:
+        label: "{{ item.term_side }}"
+      when:
+        - item.link_peers is defined
+        - (item.link_peers | length) > 0
+
+    - name: Fetch full device records for each cable-connected router
+      ansible.builtin.uri:
+        url: "{{ netbox_url }}/api/dcim/devices/{{ item.id }}/"
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+        return_content: true
+        validate_certs: false
+      loop: "{{ cable_routers | default([]) }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: device_lookups
+
+    - name: Register reachable routers (real EC2, public IP) for route reset
       ansible.builtin.add_host:
-        name: "{{ brs_routers.json.results[0].name }}"
+        name: "{{ item.0.name }}"
         groups: cisco_reset_routers
-        ansible_host: "{{ brs_routers.json.results[0].primary_ip.address.split('/')[0] }}"
+        ansible_host: "{{ ip_addr }}"
         ansible_user: "{{ router_username }}"
         ansible_password: "{{ router_password }}"
         ansible_network_os: cisco.ios.ios
@@ -161,9 +193,20 @@
         ansible_ssh_common_args: "-o StrictHostKeyChecking=no"
         primary_gw: "{{ router_primary_gw }}"
         backup_gw: "{{ router_backup_gw }}"
+      loop: "{{ (cable_routers | default([])) | zip(device_lookups.results | default([])) | list }}"
+      loop_control:
+        label: "{{ item.0.name }}"
+      vars:
+        device: "{{ item.1.json | default({}) }}"
+        ip_addr: "{{ device.primary_ip4.address.split('/')[0] if device.primary_ip4 else '' }}"
+        ip_octets: "{{ ip_addr.split('.') if ip_addr else ['0','0','0','0'] }}"
+        is_rfc1918: >-
+          {{ ip_addr.startswith('10.')
+             or ip_addr.startswith('192.168.')
+             or (ip_addr.startswith('172.') and (ip_octets[1] | int) >= 16 and (ip_octets[1] | int) <= 31) }}
       when:
-        - brs_routers.json.count > 0
-        - brs_routers.json.results[0].primary_ip is not none
+        - ip_addr != ''
+        - not is_rfc1918
 
 # ── Play 2: Restore primary route on A-side router ────────────────────────────
 

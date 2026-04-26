@@ -182,39 +182,82 @@
         backup_a_site: "{{ (backup_terms.json.results | selectattr('term_side', 'eq', 'A') | first).termination.display }}"
         backup_z_site: "{{ (backup_terms.json.results | selectattr('term_side', 'eq', 'Z') | first).termination.display }}"
 
-    # ── Query routers at both sites ───────────────────────────────────────────
+    # ── Discover routers via cable connections (NetBox SoT) ───────────────────
+    # The realistic NetBox model: each circuit termination is connected to a
+    # specific router interface via a Cable. Follow the cable from each
+    # termination to the device on the other end. No more guessing by site+tag.
 
-    - name: Query routers at A-side site
-      ansible.builtin.uri:
-        url: "{{ netbox_url }}/api/dcim/devices/?site_id={{ a_side_site.id }}&role=router&tag=dd"
-        headers:
-          Authorization: "Token {{ netbox_token }}"
-        return_content: true
-        validate_certs: false
-      register: a_side_routers
-
-    - name: Query routers at Z-side site
-      ansible.builtin.uri:
-        url: "{{ netbox_url }}/api/dcim/devices/?site_id={{ z_side_site.id }}&role=router&tag=dd"
-        headers:
-          Authorization: "Token {{ netbox_token }}"
-        return_content: true
-        validate_certs: false
-      register: z_side_routers
-
-    - name: Combine router list
+    - name: Build per-termination router descriptors via cable link_peers
       ansible.builtin.set_fact:
-        all_routers: "{{ a_side_routers.json.results + z_side_routers.json.results }}"
+        cable_routers: "{{ cable_routers | default([]) + [router_entry] }}"
+      vars:
+        peer: "{{ item.0.link_peers[0] }}"
+        router_entry:
+          circuit: "{{ item.1.cid }}"
+          role: "{{ item.1.role }}"
+          side: "{{ item.0.term_side }}"
+          site: "{{ item.0.termination.display }}"
+          name: "{{ peer.device.name }}"
+          id: "{{ peer.device.id }}"
+          interface: "{{ peer.name }}"
+      loop: >-
+        {{
+          (primary_terms.json.results | product([{'cid': primary.cid, 'role': 'failed'}]) | list)
+          +
+          (backup_terms.json.results | product([{'cid': backup.cid, 'role': 'backup'}]) | list)
+        }}
+      loop_control:
+        label: "{{ item.1.cid }}/{{ item.0.term_side }}"
+      when:
+        - item.0.link_peers is defined
+        - (item.0.link_peers | length) > 0
 
-    # ── Register routers for config push ─────────────────────────────────────
-    # A-side (GB-Bristol): real Cisco EC2 instance — uses cisco.ios via Play 2.
-    # Z-side (US-Atlanta): no EC2 router deployed — logged for demo context only.
+    - name: Fetch full device records (for primary_ip4)
+      ansible.builtin.uri:
+        url: "{{ netbox_url }}/api/dcim/devices/{{ item.id }}/"
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+        return_content: true
+        validate_certs: false
+      loop: "{{ cable_routers }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: device_lookups
 
-    - name: Register A-side router in dynamic inventory
+    - name: Annotate each router with primary_ip and is_real flag
+      ansible.builtin.set_fact:
+        all_routers: "{{ all_routers | default([]) + [annotated] }}"
+      loop: "{{ cable_routers | zip(device_lookups.results) | list }}"
+      loop_control:
+        label: "{{ item.0.name }}"
+      vars:
+        device: "{{ item.1.json }}"
+        ip_addr: "{{ device.primary_ip4.address.split('/')[0] if device.primary_ip4 else '' }}"
+        ip_octets: "{{ ip_addr.split('.') if ip_addr else ['0','0','0','0'] }}"
+        is_rfc1918: >-
+          {{ ip_addr.startswith('10.')
+             or ip_addr.startswith('192.168.')
+             or (ip_addr.startswith('172.') and (ip_octets[1] | int) >= 16 and (ip_octets[1] | int) <= 31) }}
+        annotated: "{{ item.0 | combine({'primary_ip': ip_addr, 'is_real': (ip_addr != '' and not is_rfc1918)}) }}"
+
+    - name: Show discovered routers
+      ansible.builtin.debug:
+        msg: |
+          Routers discovered via NetBox cable connections:
+          {% for r in all_routers %}
+            {{ r.circuit }}/{{ r.side }}: {{ r.name }} ({{ r.site }}) {{ r.interface }}
+              primary_ip={{ r.primary_ip or 'NONE' }}  reachable={{ r.is_real }}
+          {% endfor %}
+
+    # ── Register reachable routers for real config push ───────────────────────
+    # Only routers with a publicly-routable primary IP get a real config push.
+    # Simulated routers (RFC1918 IPs) are noted in the report but not contacted.
+
+    - name: Register reachable routers in dynamic inventory
       ansible.builtin.add_host:
-        name: "{{ a_side_routers.json.results[0].name }}"
-        groups: cisco_a_side_routers
-        ansible_host: "{{ a_side_routers.json.results[0].primary_ip.address.split('/')[0] }}"
+        name: "{{ item.name }}"
+        groups: cisco_target_routers
+        ansible_host: "{{ item.primary_ip }}"
         ansible_user: "{{ router_username }}"
         ansible_password: "{{ router_password }}"
         ansible_network_os: cisco.ios.ios
@@ -226,18 +269,21 @@
         ansible_ssh_common_args: "-o StrictHostKeyChecking=no"
         primary_gw: "{{ router_primary_gw }}"
         backup_gw: "{{ router_backup_gw }}"
-      when:
-        - a_side_routers.json.count > 0
-        - a_side_routers.json.results[0].primary_ip is not none
+        router_role: "{{ item.role }}"
+        router_circuit: "{{ item.circuit }}"
+      loop: "{{ all_routers | selectattr('is_real') | list }}"
+      loop_control:
+        label: "{{ item.name }} ({{ item.primary_ip }})"
 
-    - name: Log Z-side router (no EC2 router deployed at Z-side in this demo)
+    - name: Log simulated routers (no EC2 instance — config push skipped)
       ansible.builtin.debug:
         msg: >-
-          [DEMO] Z-side router {{ z_side_routers.json.results[0].name }}
-          ({{ z_side_site.display }}): would push
-          no ip route 0.0.0.0 0.0.0.0 {{ router_primary_gw }} /
-          ip route 0.0.0.0 0.0.0.0 {{ router_backup_gw }}
-      when: z_side_routers.json.count > 0
+          [SIMULATED] {{ item.circuit }}/{{ item.side }} router {{ item.name }}
+          ({{ item.site }} interface {{ item.interface }}, ip {{ item.primary_ip or 'NONE' }}):
+          would push interface state change reflecting circuit {{ item.role }}.
+      loop: "{{ all_routers | rejectattr('is_real') | list }}"
+      loop_control:
+        label: "{{ item.name }}"
 
     # ── Update NetBox ─────────────────────────────────────────────────────────
     # These are real writes — this is what updates the Visual Explorer map.
@@ -309,13 +355,13 @@
             Routers:  config pushed to {{ all_routers | map(attribute='name') | join(', ') }}
           Report will be generated and deployed by the next workflow step.
 
-# ── Play 2: Push failover config to real A-side router ────────────────────────
-# Only runs if Play 1 successfully registered a host in cisco_a_side_routers.
-# Connection vars (ansible_user, ansible_ssh_private_key_file, etc.) are set as
-# host variables via add_host in Play 1 above.
+# ── Play 2: Push failover config to reachable routers ────────────────────────
+# Runs against routers that Play 1 registered in cisco_target_routers — those
+# whose primary_ip is publicly routable (real EC2 instances). Simulated routers
+# (RFC1918 IPs) were already logged in Play 1 and are skipped here.
 
-- name: "Push failover route to A-side router"
-  hosts: cisco_a_side_routers
+- name: "Push failover route to reachable routers"
+  hosts: cisco_target_routers
   gather_facts: false
   ignore_unreachable: true
 
