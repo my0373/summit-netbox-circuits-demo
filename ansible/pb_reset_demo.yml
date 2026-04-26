@@ -134,62 +134,43 @@
           {{ circuits_to_activate | length }} other circuit(s) restored to Active.
           NetBox and Visual Explorer are back to starting state.
 
-    # ── Discover routers via cable connections (NetBox SoT) ───────────────────
-    # Follow cables for BOTH the primary circuit and any of its alternates at
-    # the same sites — the live router (with a public primary_ip) might be on
-    # the alternate's cable, not the primary's, depending on how the topology
-    # is wired.
+    # ── Discover live routers at the primary's sites ──────────────────────────
+    # Reset doesn't need cable traversal (that's a failover-narrative thing).
+    # We just need to find ALL dd-tagged routers at the sites involved in the
+    # demo and push the reset config to whichever ones have a public IP.
+    # This is robust against future topology changes — cables can be rewired,
+    # circuits can be added, but as long as the live router stays at one of
+    # the demo sites with the dd tag, this still finds it.
 
-    - name: Query terminations for primary + offline circuits at primary's sites
+    - name: Get primary circuit's A and Z site IDs
       ansible.builtin.uri:
-        url: "{{ netbox_url }}/api/circuits/circuit-terminations/?circuit_id={{ item.id }}"
+        url: "{{ netbox_url }}/api/circuits/circuit-terminations/?circuit_id={{ primary.id }}"
         headers:
           Authorization: "Token {{ netbox_token }}"
         return_content: true
         validate_certs: false
-      loop: "{{ [primary] + (all_circuits.json.results | selectattr('cid', 'in', offline_circuits) | list) }}"
-      loop_control:
-        label: "{{ item.cid }}"
-      register: cable_term_lookups
+      register: primary_terms_for_reset
 
-    - name: Build router descriptors from all cables
+    - name: Set A/Z site IDs
       ansible.builtin.set_fact:
-        cable_routers: "{{ cable_routers | default([]) + [router_entry] }}"
-      vars:
-        peer: "{{ item.link_peers[0] }}"
-        router_entry:
-          side: "{{ item.term_side }}"
-          name: "{{ peer.device.name }}"
-          id: "{{ peer.device.id }}"
-          interface: "{{ peer.name }}"
-      loop: >-
-        {{
-          cable_term_lookups.results
-          | map(attribute='json.results')
-          | flatten
-          | list
-        }}
-      loop_control:
-        label: "{{ item.term_side }}/{{ item.circuit.cid | default('?') }}"
-      when:
-        - item.link_peers is defined
-        - (item.link_peers | length) > 0
+        reset_a_site_id: "{{ (primary_terms_for_reset.json.results | selectattr('term_side', 'eq', 'A') | first).termination.id }}"
+        reset_z_site_id: "{{ (primary_terms_for_reset.json.results | selectattr('term_side', 'eq', 'Z') | first).termination.id }}"
 
-    - name: Fetch full device records for each cable-connected router
+    - name: Query dd-tagged routers at both sites
       ansible.builtin.uri:
-        url: "{{ netbox_url }}/api/dcim/devices/{{ item.id }}/"
+        url: "{{ netbox_url }}/api/dcim/devices/?role=router&tag=dd&site_id={{ item }}"
         headers:
           Authorization: "Token {{ netbox_token }}"
         return_content: true
         validate_certs: false
-      loop: "{{ cable_routers | default([]) }}"
-      loop_control:
-        label: "{{ item.name }}"
-      register: device_lookups
+      loop:
+        - "{{ reset_a_site_id }}"
+        - "{{ reset_z_site_id }}"
+      register: site_router_lookups
 
-    - name: Register reachable routers (real EC2, public IP) for route reset
+    - name: Register reachable routers (public IP) for route reset
       ansible.builtin.add_host:
-        name: "{{ item.0.name }}"
+        name: "{{ item.name }}"
         groups: cisco_reset_routers
         ansible_host: "{{ ip_addr }}"
         ansible_user: "{{ router_username }}"
@@ -203,12 +184,11 @@
         ansible_ssh_common_args: "-o StrictHostKeyChecking=no"
         primary_gw: "{{ router_primary_gw }}"
         backup_gw: "{{ router_backup_gw }}"
-      loop: "{{ (cable_routers | default([])) | zip(device_lookups.results | default([])) | list }}"
+      loop: "{{ site_router_lookups.results | map(attribute='json.results') | flatten | list }}"
       loop_control:
-        label: "{{ item.0.name }}"
+        label: "{{ item.name }}"
       vars:
-        device: "{{ item.1.json | default({}) }}"
-        ip_addr: "{{ device.primary_ip4.address.split('/')[0] if device.primary_ip4 else '' }}"
+        ip_addr: "{{ item.primary_ip4.address.split('/')[0] if item.primary_ip4 else '' }}"
         ip_octets: "{{ ip_addr.split('.') if ip_addr else ['0','0','0','0'] }}"
         is_rfc1918: >-
           {{ ip_addr.startswith('10.')
@@ -236,20 +216,34 @@
               - "ip route 0.0.0.0 0.0.0.0 {{ hostvars[inventory_hostname]['primary_gw'] }}"
             save_when: changed
 
-        - name: Verify primary route is active
+        - name: Read running-config for verification
           cisco.ios.ios_command:
             commands:
-              - show ip route 0.0.0.0
-          register: route_check
+              - show running-config | include ^ip route
+          register: running_routes
+
+        - name: Verify primary route present and backup route absent
+          ansible.builtin.assert:
+            that:
+              - "(running_routes.stdout[0] | regex_search('ip route 0\\\\.0\\\\.0\\\\.0 0\\\\.0\\\\.0\\\\.0 ' + (hostvars[inventory_hostname]['primary_gw'] | regex_escape))) is not none"
+              - "(running_routes.stdout[0] | regex_search('ip route 0\\\\.0\\\\.0\\\\.0 0\\\\.0\\\\.0\\\\.0 ' + (hostvars[inventory_hostname]['backup_gw'] | regex_escape))) is none"
+            fail_msg: |
+              Reset verification failed on {{ inventory_hostname }}!
+              Expected primary route ({{ hostvars[inventory_hostname]['primary_gw'] }}) to be present
+              and backup route ({{ hostvars[inventory_hostname]['backup_gw'] }}) to be absent.
+              Actual running-config:
+              {{ running_routes.stdout[0] }}
 
         - name: Confirm route restored
           ansible.builtin.debug:
-            msg: "{{ route_check.stdout_lines }}"
+            msg: |
+              Router {{ inventory_hostname }} reset OK — primary route active.
+              {{ running_routes.stdout[0] }}
       rescue:
-        - name: Router reset failed — NetBox is reset, router still on backup route
-          ansible.builtin.debug:
-            msg: >-
-              Router config reset on {{ inventory_hostname }} failed
-              ({{ ansible_failed_result.msg | default('unknown') }}).
-              NetBox is back to starting state but the router config
-              was not reverted — investigate the SSH algorithm issue.
+        - name: Router reset failed — surface clearly so it isn't missed
+          ansible.builtin.fail:
+            msg: |
+              ROUTER RESET FAILED on {{ inventory_hostname }}.
+              {{ ansible_failed_result.msg | default('unknown error') }}
+              NetBox is back to starting state, but the router config was
+              not reverted. Investigate before running the demo.
