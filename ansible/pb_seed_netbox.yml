@@ -1,0 +1,210 @@
+---
+# pb_seed_netbox.yml
+#
+# Seeds a fresh NetBox instance with the demo data required by the
+# circuit failover playbooks. Idempotent — safe to re-run.
+#
+# Usage:
+#   ansible-navigator run ansible/pb_seed_netbox.yml \
+#     -i ansible/inventory/localhost.yml \
+#     --eei localhost/network-netbox-eda-ee:latest \
+#     --mode stdout --senv NETBOX_URL --senv NETBOX_TOKEN
+
+- name: Seed NetBox with demo data
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars_files:
+    - vars/netbox_creds.yml
+
+  tasks:
+
+    # ── Tags ──────────────────────────────────────────────────────────────────
+
+    - name: Create dd tag
+      netbox.netbox.netbox_tag:
+        netbox_url: "{{ netbox_url }}"
+        netbox_token: "{{ netbox_token }}"
+        validate_certs: "{{ netbox_validate_certs }}"
+        data:
+          name: dd
+          description: "Demo day — scopes all queries to demo-relevant objects"
+        state: present
+
+    # ── Sites ─────────────────────────────────────────────────────────────────
+
+    - name: Create sites
+      netbox.netbox.netbox_site:
+        netbox_url: "{{ netbox_url }}"
+        netbox_token: "{{ netbox_token }}"
+        validate_certs: "{{ netbox_validate_certs }}"
+        data:
+          name: "{{ item.name }}"
+          status: Active
+        state: present
+      loop:
+        - { name: "GB-Bristol" }
+        - { name: "US-Atlanta" }
+      loop_control:
+        label: "{{ item.name }}"
+
+    # ── Provider ──────────────────────────────────────────────────────────────
+
+    - name: Create provider
+      netbox.netbox.netbox_provider:
+        netbox_url: "{{ netbox_url }}"
+        netbox_token: "{{ netbox_token }}"
+        validate_certs: "{{ netbox_validate_certs }}"
+        data:
+          name: Global Telecom
+        state: present
+
+    # ── Circuit type ──────────────────────────────────────────────────────────
+
+    - name: Create circuit type
+      netbox.netbox.netbox_circuit_type:
+        netbox_url: "{{ netbox_url }}"
+        netbox_token: "{{ netbox_token }}"
+        validate_certs: "{{ netbox_validate_certs }}"
+        data:
+          name: IPLC
+        state: present
+
+    # ── Device infrastructure ─────────────────────────────────────────────────
+
+    - name: Create manufacturer
+      netbox.netbox.netbox_manufacturer:
+        netbox_url: "{{ netbox_url }}"
+        netbox_token: "{{ netbox_token }}"
+        validate_certs: "{{ netbox_validate_certs }}"
+        data:
+          name: Cisco
+        state: present
+
+    - name: Create device type
+      netbox.netbox.netbox_device_type:
+        netbox_url: "{{ netbox_url }}"
+        netbox_token: "{{ netbox_token }}"
+        validate_certs: "{{ netbox_validate_certs }}"
+        data:
+          model: ISR4451
+          slug: isr4451
+          manufacturer: Cisco
+        state: present
+
+    - name: Create device role
+      netbox.netbox.netbox_device_role:
+        netbox_url: "{{ netbox_url }}"
+        netbox_token: "{{ netbox_token }}"
+        validate_certs: "{{ netbox_validate_certs }}"
+        data:
+          name: router
+          color: "0000FF"
+        state: present
+
+    # ── Devices ───────────────────────────────────────────────────────────────
+
+    - name: Create routers
+      netbox.netbox.netbox_device:
+        netbox_url: "{{ netbox_url }}"
+        netbox_token: "{{ netbox_token }}"
+        validate_certs: "{{ netbox_validate_certs }}"
+        data:
+          name: "{{ item.name }}"
+          device_type: ISR4451
+          device_role: router
+          site: "{{ item.site }}"
+          tags:
+            - dd
+        state: present
+      loop:
+        - { name: "gb-rtr-01", site: "GB-Bristol" }
+        - { name: "us-rtr-01", site: "US-Atlanta" }
+      loop_control:
+        label: "{{ item.name }}"
+
+    # ── Circuits ──────────────────────────────────────────────────────────────
+
+    - name: Create circuits
+      netbox.netbox.netbox_circuit:
+        netbox_url: "{{ netbox_url }}"
+        netbox_token: "{{ netbox_token }}"
+        validate_certs: "{{ netbox_validate_certs }}"
+        data:
+          cid: "{{ item.cid }}"
+          provider: Global Telecom
+          circuit_type: IPLC
+          status: "{{ item.status }}"
+          commit_rate: "{{ item.commit_rate }}"
+          tags:
+            - dd
+        state: present
+      loop:
+        - { cid: "IPLC-GB-AT-PRI", status: "Active", commit_rate: 10000 }
+        - { cid: "IPLC-GB-AT-SEC", status: "Offline", commit_rate: 5000 }
+      loop_control:
+        label: "{{ item.cid }}"
+
+    # ── Circuit terminations (NetBox 4.2+ format) ─────────────────────────────
+
+    - name: Look up site IDs for terminations
+      ansible.builtin.set_fact:
+        site_lookup: >-
+          {{ query('netbox.netbox.nb_lookup', 'sites',
+                   api_endpoint=netbox_url,
+                   token=netbox_token,
+                   api_filter='name=GB-Bristol',
+                   validate_certs=netbox_validate_certs,
+                   raw_data=true) }}
+
+    - name: Set GB-Bristol site ID
+      ansible.builtin.set_fact:
+        gb_bristol_id: "{{ site_lookup[0].id }}"
+
+    - name: Look up US-Atlanta site ID
+      ansible.builtin.set_fact:
+        us_atlanta_lookup: >-
+          {{ query('netbox.netbox.nb_lookup', 'sites',
+                   api_endpoint=netbox_url,
+                   token=netbox_token,
+                   api_filter='name=US-Atlanta',
+                   validate_certs=netbox_validate_certs,
+                   raw_data=true) }}
+
+    - name: Set US-Atlanta site ID
+      ansible.builtin.set_fact:
+        us_atlanta_id: "{{ us_atlanta_lookup[0].id }}"
+
+    - name: Create circuit terminations
+      netbox.netbox.netbox_circuit_termination:
+        netbox_url: "{{ netbox_url }}"
+        netbox_token: "{{ netbox_token }}"
+        validate_certs: "{{ netbox_validate_certs }}"
+        data:
+          circuit: "{{ item.circuit }}"
+          term_side: "{{ item.side }}"
+          termination_type: dcim.site
+          termination_id: "{{ item.site_id }}"
+          port_speed: "{{ item.port_speed }}"
+        state: present
+      loop:
+        - { circuit: "IPLC-GB-AT-PRI", side: "A", site_id: "{{ gb_bristol_id }}", port_speed: 10000 }
+        - { circuit: "IPLC-GB-AT-PRI", side: "Z", site_id: "{{ us_atlanta_id }}", port_speed: 10000 }
+        - { circuit: "IPLC-GB-AT-SEC", side: "A", site_id: "{{ gb_bristol_id }}", port_speed: 5000 }
+        - { circuit: "IPLC-GB-AT-SEC", side: "Z", site_id: "{{ us_atlanta_id }}", port_speed: 5000 }
+      loop_control:
+        label: "{{ item.circuit }} {{ item.side }}-side"
+
+    # ── Summary ───────────────────────────────────────────────────────────────
+
+    - name: Seed complete
+      ansible.builtin.debug:
+        msg: |
+          NetBox seeded with demo data:
+            Sites:    GB-Bristol, US-Atlanta
+            Provider: Global Telecom
+            Circuits: IPLC-GB-AT-PRI (active), IPLC-GB-AT-SEC (offline)
+            Routers:  gb-rtr-01, us-rtr-01
+            Tag:      dd (applied to all circuits, routers)
+        verbosity: 0

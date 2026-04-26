@@ -32,3 +32,10 @@ collections/ansible_collections/
 
 # Temporary files
 tmp/
+
+# ansible-navigator artifacts
+*-artifact-*.json
+ansible-navigator.log
+
+# Report backups
+ansible/reports/*.html.*~

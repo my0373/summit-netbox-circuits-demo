@@ -84,10 +84,10 @@
       <div class="field"><span class="key">Committed Rate</span><span class="val">{{ primary.commit_rate // 1000 }} Mbps</span></div>
       <div class="field"><span class="key">A-side</span><span class="val">{{ primary_a_site }}</span></div>
       <div class="field"><span class="key">Z-side</span><span class="val">{{ primary_z_site }}</span></div>
-{% if primary.custom_fields.monthly_cost %}
+{% if primary.custom_fields.get('monthly_cost') %}
       <div class="field"><span class="key">Monthly Cost</span><span class="val">${{ primary.custom_fields.monthly_cost | int | string | replace(',', '') }}</span></div>
 {% endif %}
-{% if primary.custom_fields.sla_uptime %}
+{% if primary.custom_fields.get('sla_uptime') %}
       <div class="field"><span class="key">SLA</span><span class="val">{{ primary.custom_fields.sla_uptime }}% / {{ primary.custom_fields.sla_mttr_hours }}h MTTR</span></div>
 {% endif %}
     </div>
@@ -101,10 +101,10 @@
       <div class="field"><span class="key">Committed Rate</span><span class="val">{{ backup.commit_rate // 1000 }} Mbps</span></div>
       <div class="field"><span class="key">A-side</span><span class="val">{{ backup_a_site }}</span></div>
       <div class="field"><span class="key">Z-side</span><span class="val">{{ backup_z_site }}</span></div>
-{% if backup.custom_fields.monthly_cost %}
+{% if backup.custom_fields.get('monthly_cost') %}
       <div class="field"><span class="key">Monthly Cost</span><span class="val">${{ backup.custom_fields.monthly_cost | int | string | replace(',', '') }}</span></div>
 {% endif %}
-{% if backup.custom_fields.sla_uptime %}
+{% if backup.custom_fields.get('sla_uptime') %}
       <div class="field"><span class="key">SLA</span><span class="val">{{ backup.custom_fields.sla_uptime }}% / {{ backup.custom_fields.sla_mttr_hours }}h MTTR</span></div>
 {% endif %}
     </div>

@@ -37,7 +37,6 @@
     report_dir: "{{ playbook_dir }}/reports"
 
   tasks:
-
     # ── Setup ─────────────────────────────────────────────────────────────────
 
     - name: Create report directory
@@ -282,7 +281,7 @@
       ansible.builtin.debug:
         msg: >-
           {{ primary.cid }}:
-          {{ primary.status.label }} → {{ primary_update.circuit.status.label }}
+          {{ primary.status.label }} → {{ primary_update.circuit.status }}
         verbosity: 0
       when: primary.status.value != 'offline'
 
@@ -309,7 +308,7 @@
       ansible.builtin.debug:
         msg: >-
           {{ backup.cid }}:
-          {{ backup.status.label }} → {{ backup_update.circuit.status.label }}
+          {{ backup.status.label }} → {{ backup_update.circuit.status }}
         verbosity: 0
       when: backup.status.value != 'active'
 
