@@ -221,7 +221,7 @@
         ansible_connection: ansible.netcommon.network_cli
         ansible_become: true
         ansible_become_method: enable
-        ansible_ssh_common_args: "-o StrictHostKeyChecking=no"
+        ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o HostKeyAlgorithms=+ssh-rsa -o PubkeyAcceptedKeyTypes=+ssh-rsa -o KexAlgorithms=+diffie-hellman-group14-sha1"
         primary_gw: "{{ router_primary_gw }}"
         backup_gw: "{{ router_backup_gw }}"
       when:
