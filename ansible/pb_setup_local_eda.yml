@@ -1,0 +1,263 @@
+---
+# pb_setup_local_eda.yml
+#
+# Starts an ansible-rulebook container using the AAP 2.6 Decision
+# Environment, connected to the local NetBox network. Configures a
+# NetBox webhook and event rule so circuit status changes are routed
+# to ansible-rulebook automatically.
+#
+# Prerequisites:
+#   - Local NetBox running (pb_setup_local_netbox.yml)
+#   - Demo data seeded (pb_seed_netbox.yml)
+#   - Podman with access to registry.redhat.io
+#
+# Usage:
+#   ansible-playbook ansible/pb_setup_local_eda.yml
+#
+# Teardown:
+#   ansible-playbook ansible/pb_setup_local_eda.yml -e teardown=true
+#
+# Test:
+#   ansible-playbook ansible/pb_setup_local_eda.yml -e test=true
+
+- name: Deploy local EDA environment for testing
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars_files:
+    - vars/netbox_creds.yml
+
+  vars:
+    de_image: "registry.redhat.io/ansible-automation-platform-26/de-supported-rhel9:latest"
+    eda_container_name: "eda-rulebook"
+    eda_rulebook_path: "rulebooks/rulebook.yml"
+    eda_test_rulebook_path: "tmp/test_rulebook.yml"
+    netbox_compose_network: "netbox-docker-2_default"
+    netbox_port: 8001
+    project_dir: "{{ playbook_dir }}/.."
+    teardown: false
+    test: false
+
+  tasks:
+
+    # ── Teardown path ─────────────────────────────────────────────────────────
+
+    - name: Teardown EDA environment
+      when: teardown | bool
+      block:
+        - name: Stop and remove EDA container
+          ansible.builtin.command:
+            cmd: "podman rm -f {{ eda_container_name }}"
+          changed_when: true
+          failed_when:
+            - teardown_eda.rc != 0
+            - "'no such container' not in (teardown_eda.stderr | lower)"
+          register: teardown_eda
+
+        - name: Remove NetBox webhook
+          ansible.builtin.uri:
+            url: "{{ netbox_url }}/api/extras/webhooks/?name=EDA+Circuit+Failover"
+            headers:
+              Authorization: "Token {{ netbox_token }}"
+            validate_certs: "{{ netbox_validate_certs }}"
+          register: existing_webhooks
+
+        - name: Delete webhook if exists
+          ansible.builtin.uri:
+            url: "{{ netbox_url }}/api/extras/webhooks/{{ item.id }}/"
+            method: DELETE
+            headers:
+              Authorization: "Token {{ netbox_token }}"
+            validate_certs: "{{ netbox_validate_certs }}"
+            status_code: 204
+          loop: "{{ existing_webhooks.json.results }}"
+          loop_control:
+            label: "{{ item.name }}"
+          when: existing_webhooks.json.count > 0
+
+        - name: Remove NetBox event rule
+          ansible.builtin.uri:
+            url: "{{ netbox_url }}/api/extras/event-rules/?name=EDA+Circuit+Failover"
+            headers:
+              Authorization: "Token {{ netbox_token }}"
+            validate_certs: "{{ netbox_validate_certs }}"
+          register: existing_rules
+
+        - name: Delete event rule if exists
+          ansible.builtin.uri:
+            url: "{{ netbox_url }}/api/extras/event-rules/{{ item.id }}/"
+            method: DELETE
+            headers:
+              Authorization: "Token {{ netbox_token }}"
+            validate_certs: "{{ netbox_validate_certs }}"
+            status_code: 204
+          loop: "{{ existing_rules.json.results }}"
+          loop_control:
+            label: "{{ item.name }}"
+          when: existing_rules.json.count > 0
+
+        - name: End play after teardown
+          ansible.builtin.meta: end_play
+
+    # ── Setup path ────────────────────────────────────────────────────────────
+
+    - name: Create test rulebook with debug action
+      ansible.builtin.copy:
+        dest: "{{ project_dir }}/tmp/test_rulebook.yml"
+        mode: "0644"
+        content: |
+          {% raw %}
+          ---
+          - name: NetBox Circuit Failover (local test)
+            hosts: all
+            sources:
+              - ansible.eda.webhook:
+                  host: 0.0.0.0
+                  port: 5000
+            rules:
+              - name: Circuit failure detected
+                condition: >
+                  event.payload.object_type == "circuits.circuit" and
+                  event.payload.data.status.value in ["offline", "failed"]
+                action:
+                  debug:
+                    msg: >-
+                      FAILOVER TRIGGERED: {{ event.payload.data.cid }}
+                      status={{ event.payload.data.status.value }}
+
+              - name: Circuit update — no action needed
+                condition: >
+                  event.payload.object_type == "circuits.circuit" and
+                  event.payload.data.status.value not in ["offline", "failed"]
+                action:
+                  debug:
+                    msg: >-
+                      IGNORED: {{ event.payload.data.cid }}
+                      status={{ event.payload.data.status.value }}
+          {% endraw %}
+
+    - name: Remove existing EDA container if present
+      ansible.builtin.command:
+        cmd: "podman rm -f {{ eda_container_name }}"
+      changed_when: true
+      failed_when:
+        - remove_old.rc != 0
+        - "'no such container' not in (remove_old.stderr | lower)"
+      register: remove_old
+
+    - name: Choose rulebook
+      ansible.builtin.set_fact:
+        active_rulebook: "{{ eda_test_rulebook_path if (test | bool) else eda_rulebook_path }}"
+
+    - name: Start ansible-rulebook in DE container
+      ansible.builtin.command:
+        cmd: >-
+          podman run -d
+          --name {{ eda_container_name }}
+          --network {{ netbox_compose_network }}
+          -v {{ project_dir }}:/workdir:Z
+          -w /workdir
+          {{ de_image }}
+          ansible-rulebook
+          --rulebook {{ active_rulebook }}
+          -i ansible/inventory/localhost.yml
+          --verbose
+      changed_when: true
+      register: eda_container
+
+    - name: Wait for ansible-rulebook to start
+      ansible.builtin.command:
+        cmd: "podman logs {{ eda_container_name }}"
+      register: eda_logs
+      until: "'Waiting for events' in eda_logs.stdout"
+      retries: 12
+      delay: 5
+      changed_when: false
+
+    - name: Get EDA container IP
+      ansible.builtin.command:
+        cmd: >-
+          podman inspect {{ eda_container_name }}
+          --format {% raw %}'{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'{% endraw %}
+      register: eda_ip_result
+      changed_when: false
+
+    - name: Set EDA endpoint URL
+      ansible.builtin.set_fact:
+        eda_endpoint: "http://{{ eda_ip_result.stdout }}:5000/endpoint"
+
+    # ── Configure NetBox webhook → EDA ────────────────────────────────────────
+
+    - name: Create or update NetBox webhook
+      ansible.builtin.uri:
+        url: "{{ netbox_url }}/api/extras/webhooks/"
+        method: POST
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          name: "EDA Circuit Failover"
+          payload_url: "{{ eda_endpoint }}"
+          http_method: "POST"
+          http_content_type: "application/json"
+          body_template: ""
+          ssl_verification: false
+        validate_certs: "{{ netbox_validate_certs }}"
+        status_code:
+          - 201
+      register: webhook_result
+
+    - name: Create NetBox event rule
+      ansible.builtin.uri:
+        url: "{{ netbox_url }}/api/extras/event-rules/"
+        method: POST
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          name: "EDA Circuit Failover"
+          enabled: true
+          object_types:
+            - "circuits.circuit"
+          event_types:
+            - "object_updated"
+          action_type: "webhook"
+          action_object_type: "extras.webhook"
+          action_object_id: "{{ webhook_result.json.id }}"
+        validate_certs: "{{ netbox_validate_certs }}"
+        status_code:
+          - 201
+      register: event_rule_result
+
+    # ── Summary ───────────────────────────────────────────────────────────────
+
+    - name: Setup complete
+      ansible.builtin.debug:
+        msg: |
+          Local EDA environment is ready.
+
+            DE image:     {{ de_image }}
+            Container:    {{ eda_container_name }}
+            Rulebook:     {{ active_rulebook }}
+            EDA endpoint: {{ eda_endpoint }}
+            Mode:         {{ 'TEST (debug action)' if (test | bool) else 'LIVE (run_workflow_template — requires AAP)' }}
+
+            NetBox webhook:   EDA Circuit Failover → {{ eda_endpoint }}
+            NetBox event rule: EDA Circuit Failover (circuits.circuit → object_updated)
+
+          Test the flow:
+            # Set circuit to offline
+            curl -s -X PATCH "http://localhost:{{ netbox_port }}/api/circuits/circuits/1/" \
+              -H "Authorization: Token {{ netbox_token }}" \
+              -H "Content-Type: application/json" \
+              -d '{"status": "offline"}'
+
+            # Watch EDA logs
+            podman logs -f {{ eda_container_name }}
+
+          Teardown:
+            ansible-playbook ansible/pb_setup_local_eda.yml -e teardown=true
+        verbosity: 0
