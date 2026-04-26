@@ -2,11 +2,8 @@
 # EDA Rulebook: NetBox Circuit Failover
 #
 # Listens for NetBox webhook events via an EDA event stream.
-# When a circuit tagged 'dd' is set to offline or failed,
-# triggers the Circuit Failover job template in AAP controller.
-#
-# Event stream source: configured in EDA platform (HTTP endpoint).
-# NetBox webhook posts circuit change events to that endpoint.
+# When a circuit is set to offline or failed, triggers the
+# Circuit Failover Workflow in AAP controller.
 
 - name: NetBox Circuit Failover
   hosts: all
@@ -17,26 +14,38 @@
 
   rules:
 
-    - name: Circuit set to offline — trigger failover
-      condition: >
-        event.payload.model == "circuit" and
-        event.payload.data.status.value == "offline"
+    # Debug rule — fires on every event so we can inspect the payload structure
+    # in the activation logs. Remove once the real rule is confirmed working.
+    - name: DEBUG — log every event
+      condition: event is defined
       action:
-        run_job_template:
-          name: "Circuit Failover"
+        debug:
+          msg: "EVENT RECEIVED: {{ event }}"
+
+    # Match on the wrapped form (event.payload.*)
+    - name: Circuit offline (payload.* form)
+      condition: >
+        event.payload is defined and
+        event.payload.model == "circuit" and
+        event.payload.data.status.value in ["offline", "failed"]
+      action:
+        run_workflow_template:
+          name: "Circuit Failover Workflow"
           organization: "Summit"
           job_args:
             extra_vars:
               failed_circuit: "{{ event.payload.data.cid }}"
 
-    - name: Circuit set to failed — trigger failover
+    # Match on the unwrapped form (event.* directly)
+    - name: Circuit offline (event.* form)
       condition: >
-        event.payload.model == "circuit" and
-        event.payload.data.status.value == "failed"
+        event.model is defined and
+        event.model == "circuit" and
+        event.data.status.value in ["offline", "failed"]
       action:
-        run_job_template:
-          name: "Circuit Failover"
+        run_workflow_template:
+          name: "Circuit Failover Workflow"
           organization: "Summit"
           job_args:
             extra_vars:
-              failed_circuit: "{{ event.payload.data.cid }}"
+              failed_circuit: "{{ event.data.cid }}"
