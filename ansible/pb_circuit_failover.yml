@@ -35,8 +35,8 @@
   vars:
     failed_circuit: "IPLC-GB-AT-PRI"
     report_dir: "{{ playbook_dir }}/reports"
-    router_username: "iosuser"
-    router_password: "{{ ansible_password | default('') }}"
+    router_username: "{{ lookup('env', 'ANSIBLE_NET_USERNAME') | default('iosuser', true) }}"
+    router_password: "{{ lookup('env', 'ANSIBLE_NET_PASSWORD') | default(ansible_password | default(''), true) }}"
     router_primary_gw: "172.16.0.1"
     router_backup_gw: "172.16.1.1"
 
