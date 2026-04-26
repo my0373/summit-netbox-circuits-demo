@@ -16,12 +16,15 @@
 
   vars_files:
     - vars/netbox_creds.yml
-    - vars/network_creds.yml
 
   vars:
     primary_circuit: "IPLC-GB-AT-PRI"
     offline_circuits:
       - IPLC-GB-AT-SEC
+    router_username: "{{ lookup('env', 'ANSIBLE_NET_USERNAME') | default('iosuser', true) }}"
+    router_password: "{{ lookup('env', 'ANSIBLE_NET_PASSWORD') | default(ansible_password | default(''), true) }}"
+    router_primary_gw: "172.16.0.1"
+    router_backup_gw: "172.16.1.1"
 
   tasks:
 
