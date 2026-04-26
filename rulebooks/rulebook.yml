@@ -4,6 +4,11 @@
 # Listens for NetBox webhook events via an EDA event stream.
 # When a circuit is set to offline or failed, triggers the
 # Circuit Failover Workflow in AAP controller.
+#
+# NetBox 4.x webhook payload structure (verified from EDA logs):
+#   event.payload.object_type      → "circuits.circuit"
+#   event.payload.data.status.value → "active" | "offline" | ...
+#   event.payload.data.cid          → e.g. "IPLC-GB-AT-PRI"
 
 - name: NetBox Circuit Failover
   hosts: all
@@ -15,11 +20,9 @@
 
   rules:
 
-    # Match on the wrapped form (event.payload.*) — what NetBox sends via
-    # AAP EDA event streams when the body comes through the webhook source.
-    - name: Circuit offline (payload.* form)
+    - name: Circuit set to offline — trigger failover workflow
       condition: >
-        event.payload.model == "circuit" and
+        event.payload.object_type == "circuits.circuit" and
         event.payload.data.status.value == "offline"
       action:
         run_workflow_template:
@@ -29,9 +32,9 @@
             extra_vars:
               failed_circuit: "{{ event.payload.data.cid }}"
 
-    - name: Circuit failed (payload.* form)
+    - name: Circuit set to failed — trigger failover workflow
       condition: >
-        event.payload.model == "circuit" and
+        event.payload.object_type == "circuits.circuit" and
         event.payload.data.status.value == "failed"
       action:
         run_workflow_template:
@@ -40,39 +43,3 @@
           job_args:
             extra_vars:
               failed_circuit: "{{ event.payload.data.cid }}"
-
-    # Match on the unwrapped form (event.* directly) — covers the case where
-    # the event stream delivers the body without wrapping it in 'payload'.
-    - name: Circuit offline (event.* form)
-      condition: >
-        event.model == "circuit" and
-        event.data.status.value == "offline"
-      action:
-        run_workflow_template:
-          name: "Circuit Failover Workflow"
-          organization: "Summit"
-          job_args:
-            extra_vars:
-              failed_circuit: "{{ event.data.cid }}"
-
-    - name: Circuit failed (event.* form)
-      condition: >
-        event.model == "circuit" and
-        event.data.status.value == "failed"
-      action:
-        run_workflow_template:
-          name: "Circuit Failover Workflow"
-          organization: "Summit"
-          job_args:
-            extra_vars:
-              failed_circuit: "{{ event.data.cid }}"
-
-    # Debug catch-all — log every event regardless of structure so we can
-    # inspect the actual payload shape. Uses a tautology that's syntactically
-    # valid: any event will have *some* key, so checking 'event.payload is
-    # defined or event.payload is not defined' is always true.
-    - name: DEBUG — log every event
-      condition: event.payload is defined or event.payload is not defined
-      action:
-        debug:
-          msg: "EVENT_DEBUG: {{ event }}"
