@@ -27,7 +27,7 @@
       action:
         run_workflow_template:
           name: "Circuit Failover Workflow"
-          organization: "Summit"
+          organization: "Default"
           job_args:
             extra_vars:
               failed_circuit: "{{ event.payload.data.cid }}"
@@ -39,7 +39,7 @@
       action:
         run_workflow_template:
           name: "Circuit Failover Workflow"
-          organization: "Summit"
+          organization: "Default"
           job_args:
             extra_vars:
               failed_circuit: "{{ event.payload.data.cid }}"
