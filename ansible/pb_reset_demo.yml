@@ -23,7 +23,6 @@
       - IPLC-GB-AT-SEC
 
   tasks:
-
     - name: Fetch all circuits tagged 'dd'
       ansible.builtin.set_fact:
         all_circuits: >-
