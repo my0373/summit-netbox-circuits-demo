@@ -31,6 +31,7 @@
 
   vars_files:
     - vars/netbox_creds.yml
+    - vars/network_creds.yml
 
   vars:
     failed_circuit: "IPLC-GB-AT-PRI"
@@ -202,43 +203,36 @@
       ansible.builtin.set_fact:
         all_routers: "{{ a_side_routers.json.results + z_side_routers.json.results }}"
 
-    # ── Simulated router operations ───────────────────────────────────────────
-    # In a real deployment these tasks would use ios_config / napalm / etc.
-    # For the demo the routers are simulated — we log what would happen.
+    # ── Register routers for config push ─────────────────────────────────────
+    # A-side (GB-Bristol): real Cisco EC2 instance — uses cisco.ios via Play 2.
+    # Z-side (US-Atlanta): no EC2 router deployed — logged for demo context only.
 
-    - name: "[SIMULATED] Check primary router interface status"
-      ansible.builtin.debug:
-        msg: |
-          Connecting to {{ a_side_routers.json.results[0].name }} ...
-          GigabitEthernet0/0/0: protocol down, line protocol down
-          Confirmed: primary WAN interface is down.
+    - name: Register A-side router in dynamic inventory
+      ansible.builtin.add_host:
+        name: "{{ a_side_routers.json.results[0].name }}"
+        groups: cisco_a_side_routers
+        ansible_host: "{{ a_side_routers.json.results[0].primary_ip.address.split('/')[0] }}"
+        ansible_user: "{{ router_username }}"
+        ansible_password: "{{ router_password }}"
+        ansible_network_os: cisco.ios.ios
+        ansible_connection: ansible.netcommon.network_cli
+        ansible_become: true
+        ansible_become_method: enable
+        ansible_ssh_common_args: "-o StrictHostKeyChecking=no"
+        primary_gw: "{{ router_primary_gw }}"
+        backup_gw: "{{ router_backup_gw }}"
+      when:
+        - a_side_routers.json.count > 0
+        - a_side_routers.json.results[0].primary_ip is not none
 
-    - name: "[SIMULATED] Verify backup interface is up"
+    - name: Log Z-side router (no EC2 router deployed at Z-side in this demo)
       ansible.builtin.debug:
-        msg: |
-          Connecting to {{ a_side_routers.json.results[0].name }} ...
-          GigabitEthernet0/0/2: protocol up, line protocol up
-          Backup WAN interface is available.
-
-    - name: "[SIMULATED] Push failover config to A-side router"
-      ansible.builtin.debug:
-        msg: |
-          Pushing config to {{ a_side_routers.json.results[0].name }} ({{ a_side_site.display }}):
-            conf t
-            no ip route 0.0.0.0 0.0.0.0 172.16.0.1
-            ip route 0.0.0.0 0.0.0.0 {{ backup.custom_fields.get('backup_gateway', '172.16.1.1') }}
-            end
-          Config applied successfully.
-
-    - name: "[SIMULATED] Push failover config to Z-side router"
-      ansible.builtin.debug:
-        msg: |
-          Pushing config to {{ z_side_routers.json.results[0].name }} ({{ z_side_site.display }}):
-            conf t
-            no ip route 0.0.0.0 0.0.0.0 172.16.0.2
-            ip route 0.0.0.0 0.0.0.0 {{ backup.custom_fields.get('backup_gateway', '172.16.1.2') }}
-            end
-          Config applied successfully.
+        msg: >-
+          [DEMO] Z-side router {{ z_side_routers.json.results[0].name }}
+          ({{ z_side_site.display }}): would push
+          no ip route 0.0.0.0 0.0.0.0 {{ router_primary_gw }} /
+          ip route 0.0.0.0 0.0.0.0 {{ router_backup_gw }}
+      when: z_side_routers.json.count > 0
 
     # ── Update NetBox ─────────────────────────────────────────────────────────
     # These are real writes — this is what updates the Visual Explorer map.
@@ -309,3 +303,31 @@
             Backup:   {{ backup.cid }} ({{ backup.provider.name }}, {{ backup.commit_rate // 1000 }} Mbps)
             Routers:  config pushed to {{ all_routers | map(attribute='name') | join(', ') }}
           Report will be generated and deployed by the next workflow step.
+
+# ── Play 2: Push failover config to real A-side router ────────────────────────
+# Only runs if Play 1 successfully registered a host in cisco_a_side_routers.
+# Connection vars (ansible_user, ansible_ssh_private_key_file, etc.) are set as
+# host variables via add_host in Play 1 above.
+
+- name: "Push failover route to A-side router"
+  hosts: cisco_a_side_routers
+  gather_facts: false
+
+  tasks:
+
+    - name: Remove primary default route and activate backup route
+      cisco.ios.ios_config:
+        lines:
+          - "no ip route 0.0.0.0 0.0.0.0 {{ hostvars[inventory_hostname]['primary_gw'] }}"
+          - "ip route 0.0.0.0 0.0.0.0 {{ hostvars[inventory_hostname]['backup_gw'] }}"
+        save_when: changed
+
+    - name: Verify backup route is active
+      cisco.ios.ios_command:
+        commands:
+          - show ip route 0.0.0.0
+      register: route_check
+
+    - name: Confirm route change applied
+      ansible.builtin.debug:
+        msg: "{{ route_check.stdout_lines }}"
