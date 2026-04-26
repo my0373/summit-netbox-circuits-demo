@@ -210,6 +210,14 @@
     # A-side (GB-Bristol): real Cisco EC2 instance — uses cisco.ios via Play 2.
     # Z-side (US-Atlanta): no EC2 router deployed — logged for demo context only.
 
+    - name: DEBUG — verify router credentials are present
+      ansible.builtin.debug:
+        msg: >-
+          router_username='{{ router_username | default('UNDEFINED') }}'
+          router_password_length={{ (router_password | default('')) | length }}
+          ansible_user='{{ ansible_user | default('UNDEFINED') }}'
+          ansible_password_length={{ (ansible_password | default('')) | length }}
+
     - name: Register A-side router in dynamic inventory
       ansible.builtin.add_host:
         name: "{{ a_side_routers.json.results[0].name }}"
