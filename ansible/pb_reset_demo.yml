@@ -135,20 +135,24 @@
           NetBox and Visual Explorer are back to starting state.
 
     # ── Discover routers via cable connections (NetBox SoT) ───────────────────
-    # The same primary circuit we activate above has its A-side termination
-    # connected via a cable to a router interface. Follow that cable to find
-    # the live router that needs its config reverted.
+    # Follow cables for BOTH the primary circuit and any of its alternates at
+    # the same sites — the live router (with a public primary_ip) might be on
+    # the alternate's cable, not the primary's, depending on how the topology
+    # is wired.
 
-    - name: Query primary circuit terminations (for cable discovery)
+    - name: Query terminations for primary + offline circuits at primary's sites
       ansible.builtin.uri:
-        url: "{{ netbox_url }}/api/circuits/circuit-terminations/?circuit_id={{ primary.id }}"
+        url: "{{ netbox_url }}/api/circuits/circuit-terminations/?circuit_id={{ item.id }}"
         headers:
           Authorization: "Token {{ netbox_token }}"
         return_content: true
         validate_certs: false
-      register: primary_terms
+      loop: "{{ [primary] + (all_circuits.json.results | selectattr('cid', 'in', offline_circuits) | list) }}"
+      loop_control:
+        label: "{{ item.cid }}"
+      register: cable_term_lookups
 
-    - name: Build router descriptors from primary circuit cables
+    - name: Build router descriptors from all cables
       ansible.builtin.set_fact:
         cable_routers: "{{ cable_routers | default([]) + [router_entry] }}"
       vars:
@@ -158,9 +162,15 @@
           name: "{{ peer.device.name }}"
           id: "{{ peer.device.id }}"
           interface: "{{ peer.name }}"
-      loop: "{{ primary_terms.json.results }}"
+      loop: >-
+        {{
+          cable_term_lookups.results
+          | map(attribute='json.results')
+          | flatten
+          | list
+        }}
       loop_control:
-        label: "{{ item.term_side }}"
+        label: "{{ item.term_side }}/{{ item.circuit.cid | default('?') }}"
       when:
         - item.link_peers is defined
         - (item.link_peers | length) > 0
