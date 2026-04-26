@@ -31,11 +31,14 @@
 
   vars_files:
     - vars/netbox_creds.yml
-    - vars/network_creds.yml
 
   vars:
     failed_circuit: "IPLC-GB-AT-PRI"
     report_dir: "{{ playbook_dir }}/reports"
+    router_username: "iosuser"
+    router_password: "{{ ansible_password | default('') }}"
+    router_primary_gw: "172.16.0.1"
+    router_backup_gw: "172.16.1.1"
 
   tasks:
 
