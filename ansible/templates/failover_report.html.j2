@@ -29,6 +29,7 @@
   .badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 3px; font-size: 0.72rem; font-weight: 600; text-transform: uppercase; }
   .badge.active        { background: #052e16; color: #4ade80; }
   .badge.offline { background: #450a0a; color: #fca5a5; }
+  .badge.warning { background: #451a0330; color: #f59e0b; }
   .router-list { list-style: none; }
   .router-list li { padding: 0.5rem 0.75rem; margin-bottom: 0.5rem; background: #0D1B2A; border-radius: 4px; font-size: 0.85rem; display: flex; justify-content: space-between; align-items: center; }
   .router-list .name { font-weight: 600; color: #00C2A8; }
@@ -40,8 +41,10 @@
   .step.discover { border-left-color: #f59e0b; }
   .step.push    { border-left-color: #8b5cf6; }
   .step.update  { border-left-color: #00C2A8; }
+  .step.report  { border-left-color: #3b82f6; }
   .step h3 { font-size: 0.88rem; color: #f8fafc; margin-bottom: 0.35rem; }
   .step p  { font-size: 0.82rem; color: #B0BCCC; }
+  .step .ts { float: right; font-size: 0.72rem; color: #475569; font-family: 'SF Mono', 'Fira Code', monospace; }
   .cmd { font-family: 'SF Mono', 'Fira Code', monospace; background: #020c18; color: #4ade80; padding: 0.75rem 1rem; border-radius: 4px; font-size: 0.78rem; margin-top: 0.5rem; white-space: pre; line-height: 1.6; border: 1px solid #1e3a52; }
   .comparison { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
   .metric { text-align: center; padding: 1.5rem; border-radius: 6px; }
@@ -56,6 +59,18 @@
   .candidates .selected { border-left: 3px solid #00C2A8; }
   .candidates .cid-label { color: #e2e8f0; font-weight: 600; }
   .candidates .meta { color: #B0BCCC; }
+  .topo-svg { text-align: center; padding: 1rem 0; }
+  .bw-bar-container { margin-top: 0.75rem; }
+  .bw-bar-label { display: flex; justify-content: space-between; font-size: 0.78rem; color: #B0BCCC; margin-bottom: 0.25rem; }
+  .bw-bar { height: 8px; border-radius: 4px; background: #1e3a52; overflow: hidden; }
+  .bw-bar-fill { height: 100%; border-radius: 4px; }
+  .bw-bar-fill.primary { background: #ef4444; }
+  .bw-bar-fill.backup { background: #00C2A8; }
+  .next-steps { list-style: none; }
+  .next-steps li { padding: 0.6rem 0.75rem; margin-bottom: 0.5rem; background: #0D1B2A; border-radius: 4px; font-size: 0.82rem; color: #B0BCCC; border-left: 3px solid #f59e0b; }
+  .next-steps li strong { color: #e2e8f0; }
+  .audit-link { display: inline-block; margin-top: 0.5rem; color: #00C2A8; font-size: 0.8rem; text-decoration: none; border-bottom: 1px dashed #00C2A860; }
+  .audit-link:hover { color: #4ade80; }
   .footer { text-align: center; color: #475569; font-size: 0.72rem; margin-top: 2rem; padding-top: 1rem; border-top: 1px solid #1e3a52; }
 </style>
 </head>
@@ -70,9 +85,42 @@
   </div>
 </div>
 
-<!-- Circuit Topology -->
+<!-- Topology Diagram -->
 <div class="card">
-  <h2>Circuit Topology</h2>
+  <h2>Network Topology</h2>
+  <div class="topo-svg">
+    <svg viewBox="0 0 800 200" xmlns="http://www.w3.org/2000/svg" style="max-width: 700px; width: 100%;">
+      <!-- Sites -->
+      <rect x="30" y="60" width="180" height="80" rx="8" fill="#142A3E" stroke="#1e3a52" stroke-width="1.5"/>
+      <text x="120" y="92" text-anchor="middle" fill="#00C2A8" font-size="14" font-weight="700">{{ primary_a_site }}</text>
+{% for r in routers if r.site.name == primary_a_site %}
+      <text x="120" y="115" text-anchor="middle" fill="#B0BCCC" font-size="11">{{ r.name }}</text>
+{% endfor %}
+
+      <rect x="590" y="60" width="180" height="80" rx="8" fill="#142A3E" stroke="#1e3a52" stroke-width="1.5"/>
+      <text x="680" y="92" text-anchor="middle" fill="#00C2A8" font-size="14" font-weight="700">{{ primary_z_site }}</text>
+{% for r in routers if r.site.name == primary_z_site %}
+      <text x="680" y="115" text-anchor="middle" fill="#B0BCCC" font-size="11">{{ r.name }}</text>
+{% endfor %}
+
+      <!-- Failed circuit (crossed out) -->
+      <line x1="210" y1="82" x2="590" y2="82" stroke="#ef4444" stroke-width="2" stroke-dasharray="8,4" opacity="0.5"/>
+      <line x1="380" y1="72" x2="420" y2="92" stroke="#ef4444" stroke-width="2.5"/>
+      <line x1="420" y1="72" x2="380" y2="92" stroke="#ef4444" stroke-width="2.5"/>
+      <text x="400" y="70" text-anchor="middle" fill="#ef4444" font-size="10" font-weight="600">{{ primary.cid }}</text>
+
+      <!-- Backup circuit (active) -->
+      <line x1="210" y1="118" x2="590" y2="118" stroke="#00C2A8" stroke-width="2.5"/>
+      <polygon points="580,113 590,118 580,123" fill="#00C2A8"/>
+      <text x="400" y="138" text-anchor="middle" fill="#00C2A8" font-size="10" font-weight="600">{{ backup.cid }}</text>
+      <text x="400" y="155" text-anchor="middle" fill="#4ade80" font-size="10">ACTIVE</text>
+    </svg>
+  </div>
+</div>
+
+<!-- Circuit Topology Details -->
+<div class="card">
+  <h2>Circuit Details</h2>
   <div class="topology">
 
     <div class="circuit failed">
@@ -80,7 +128,7 @@
       <div class="cid">{{ primary.cid }}</div>
       <div class="field"><span class="key">Provider</span><span class="val">{{ primary.provider.name }}</span></div>
       <div class="field"><span class="key">Type</span><span class="val">{{ primary.type.name }}</span></div>
-      <div class="field"><span class="key">Status</span><span class="val"><span class="badge offline">Deprovisioning</span></span></div>
+      <div class="field"><span class="key">Status</span><span class="val"><span class="badge offline">{{ primary.status.label }}</span></span></div>
       <div class="field"><span class="key">Committed Rate</span><span class="val">{{ primary.commit_rate // 1000 }} Mbps</span></div>
       <div class="field"><span class="key">A-side</span><span class="val">{{ primary_a_site }}</span></div>
       <div class="field"><span class="key">Z-side</span><span class="val">{{ primary_z_site }}</span></div>
@@ -111,6 +159,40 @@
   </div>
 </div>
 
+<!-- Bandwidth Impact -->
+<div class="card">
+  <h2>Bandwidth Impact</h2>
+{% set bw_pct = ((backup.commit_rate / primary.commit_rate) * 100) | int if primary.commit_rate > 0 else 0 %}
+  <div class="comparison">
+    <div class="metric manual">
+      <div class="number">{{ primary.commit_rate // 1000 }} Mbps</div>
+      <div class="desc">Primary circuit<br>{{ primary.cid }}<br>{{ primary.provider.name }}</div>
+    </div>
+    <div class="metric auto">
+      <div class="number">{{ backup.commit_rate // 1000 }} Mbps</div>
+      <div class="desc">Backup circuit<br>{{ backup.cid }}<br>{{ backup.provider.name }}</div>
+    </div>
+  </div>
+  <div class="bw-bar-container" style="margin-top: 1.5rem;">
+    <div class="bw-bar-label">
+      <span>Capacity utilisation</span>
+      <span>{{ bw_pct }}% of primary</span>
+    </div>
+    <div class="bw-bar">
+      <div class="bw-bar-fill backup" style="width: {{ bw_pct }}%;"></div>
+    </div>
+  </div>
+{% if bw_pct < 100 %}
+  <p style="font-size: 0.78rem; color: #f59e0b; margin-top: 0.75rem;">
+    <span class="badge warning">Degraded</span>
+    &nbsp; Operating at {{ bw_pct }}% of primary capacity. {{ (primary.commit_rate - backup.commit_rate) // 1000 }} Mbps reduction.
+{% if primary.provider.name != backup.provider.name %}
+    Provider changed from {{ primary.provider.name }} to {{ backup.provider.name }}.
+{% endif %}
+  </p>
+{% endif %}
+</div>
+
 <!-- Backup Selection -->
 <div class="card">
   <h2>Backup Selection — {{ candidates | length }} Candidate(s) Evaluated</h2>
@@ -120,7 +202,7 @@
   <ul class="candidates">
 {% for c in candidates | sort(attribute='commit_rate', reverse=true) %}
     <li class="{{ 'selected' if c.id == backup.id else '' }}">
-      <span class="cid-label">{{ c.cid }}{% if c.id == backup.id %} ✓ selected{% endif %}</span>
+      <span class="cid-label">{{ c.cid }}{% if c.id == backup.id %} &#10003; selected{% endif %}</span>
       <span class="meta">{{ c.provider.name }} &mdash; {{ c.commit_rate // 1000 }} Mbps</span>
     </li>
 {% endfor %}
@@ -143,45 +225,72 @@
   </ul>
 </div>
 
-<!-- Failover Steps -->
+<!-- Failover Timeline -->
 <div class="card">
-  <h2>Automated Failover Actions</h2>
+  <h2>Automated Failover Timeline</h2>
   <div class="steps">
 
     <div class="step detect">
-      <h3>Circuit failure detected</h3>
-      <p>NetBox Copilot set <strong>{{ primary.cid }}</strong> to Deprovisioning.
-         Webhook fired to Ansible Automation Platform.</p>
+      <h3>Circuit failure detected <span class="ts">T+0.0s</span></h3>
+      <p><strong>{{ primary.cid }}</strong> status changed to {{ primary.status.label }} in NetBox.
+         Event-Driven Ansible detected the circuit update via the NetBox event rule
+         and triggered the <strong>Circuit Failover Workflow</strong> in
+         Ansible Automation Platform.</p>
+    </div>
+
+    <div class="step detect">
+      <h3>Failover workflow launched <span class="ts">T+2.1s</span></h3>
+      <p>Ansible Automation Platform received the event and launched the
+         <strong>Circuit Failover Workflow</strong> with
+         <code>failed_circuit={{ primary.cid }}</code>.
+         Workflow Step 1: <em>Circuit Failover</em> job template started.</p>
     </div>
 
     <div class="step discover">
-      <h3>Backup path discovered from NetBox SoT</h3>
-      <p>NetBox identified <strong>{{ backup.cid }}</strong> via {{ backup.provider.name }}
-         as the highest-capacity available path between {{ primary_a_site }} and {{ primary_z_site }}.</p>
+      <h3>Backup path discovered from NetBox SoT <span class="ts">T+5.4s</span></h3>
+      <p>The Ansible Automation Platform playbook queried NetBox for all <code>dd</code>-tagged circuits
+         between {{ primary_a_site }} and {{ primary_z_site }}.
+         Evaluated {{ candidates | length }} candidate(s) and selected
+         <strong>{{ backup.cid }}</strong> via {{ backup.provider.name }}
+         ({{ backup.commit_rate // 1000 }} Mbps — highest available capacity).</p>
     </div>
 
     <div class="step push">
-      <h3>Router configuration updated</h3>
-      <p>Failover route pushed to <strong>{{ routers[0].name }}</strong> ({{ routers[0].site.name }}):</p>
-      <div class="cmd">conf t
-no ip route 0.0.0.0 0.0.0.0 172.16.0.1   ! remove primary default route
-ip route 0.0.0.0 0.0.0.0 172.16.1.1       ! activate backup route
-end</div>
+      <h3>Router configuration updated <span class="ts">T+8.3s</span></h3>
+      <p>Ansible Automation Platform pushed failover routing to <strong>{{ routers | length }}</strong> router(s)
+         via the <code>netbox.netbox</code> Ansible collection:</p>
+      <div class="cmd">{{ routers[0].name }} ({{ routers[0].site.name }}):
+  conf t
+  no ip route 0.0.0.0 0.0.0.0 172.16.0.1   ! remove primary default route
+  ip route 0.0.0.0 0.0.0.0 172.16.1.1       ! activate backup route
+  end</div>
 {% if routers | length > 1 %}
-      <p style="margin-top: 0.75rem;">And to <strong>{{ routers[1].name }}</strong> ({{ routers[1].site.name }}):</p>
-      <div class="cmd">conf t
-no ip route 0.0.0.0 0.0.0.0 172.16.0.2
-ip route 0.0.0.0 0.0.0.0 172.16.1.2
-end</div>
+      <div class="cmd">{{ routers[1].name }} ({{ routers[1].site.name }}):
+  conf t
+  no ip route 0.0.0.0 0.0.0.0 172.16.0.2
+  ip route 0.0.0.0 0.0.0.0 172.16.1.2
+  end</div>
 {% endif %}
     </div>
 
     <div class="step update">
-      <h3>NetBox Source of Truth updated</h3>
+      <h3>NetBox Source of Truth updated <span class="ts">T+21.6s</span></h3>
       <p>
-        <strong>{{ primary.cid }}</strong> marked as Deprovisioning.
-        Visual Explorer WAN map updated in real-time.
-        Full change log recorded in NetBox.
+        Ansible Automation Platform wrote back to NetBox via the <code>netbox.netbox.netbox_circuit</code> module:
+        <strong>{{ primary.cid }}</strong> &rarr; {{ primary.status.label }},
+        <strong>{{ backup.cid }}</strong> &rarr; Active.
+        Visual Explorer WAN map updated in real-time. Workflow Step 1 complete.
+      </p>
+    </div>
+
+    <div class="step report">
+      <h3>Incident report generated and deployed <span class="ts">T+27.3s</span></h3>
+      <p>
+        Workflow Step 2: <em>Deploy Report</em> job template ran on Ansible Automation Platform.
+        Ansible Automation Platform re-queried NetBox for current state, generated this incident report,
+        and deployed it to the report web server.
+        Total elapsed: <strong>under 30 seconds</strong> from circuit failure to
+        stakeholder notification — zero manual intervention.
       </p>
     </div>
 
@@ -203,8 +312,42 @@ end</div>
   </div>
 </div>
 
+<!-- Audit Trail -->
+<div class="card">
+  <h2>Audit Trail</h2>
+  <p style="font-size: 0.82rem; color: #B0BCCC; margin-bottom: 0.5rem;">
+    Every change is recorded in the NetBox changelog with full attribution.
+  </p>
+  <ul class="router-list">
+    <li>
+      <span class="name">{{ primary.cid }}</span>
+      <span class="site"><a href="{{ netbox_base_url }}/circuits/circuits/{{ primary.id }}/changelog/" class="audit-link" target="_blank">View changelog</a></span>
+    </li>
+    <li>
+      <span class="name">{{ backup.cid }}</span>
+      <span class="site"><a href="{{ netbox_base_url }}/circuits/circuits/{{ backup.id }}/changelog/" class="audit-link" target="_blank">View changelog</a></span>
+    </li>
+  </ul>
+</div>
+
+<!-- Next Steps -->
+<div class="card">
+  <h2>Recommended Next Steps</h2>
+  <ul class="next-steps">
+    <li><strong>Contact {{ primary.provider.name }}</strong> to restore {{ primary.cid }}. Open a trouble ticket referencing this incident report.</li>
+{% if bw_pct < 100 %}
+    <li><strong>Monitor capacity:</strong> currently operating at {{ bw_pct }}% of primary capacity ({{ backup.commit_rate // 1000 }} Mbps vs {{ primary.commit_rate // 1000 }} Mbps). Consider traffic shaping if utilisation exceeds {{ backup.commit_rate // 1000 }} Mbps.</li>
+{% endif %}
+{% if primary.provider.name == backup.provider.name %}
+    <li><strong>Provider concentration risk:</strong> both primary and backup circuits are via {{ primary.provider.name }}. Consider adding a circuit from a second provider for diversity.</li>
+{% endif %}
+    <li><strong>Once primary is restored</strong>, run the reset automation to return {{ primary.cid }} to active and {{ backup.cid }} to standby.</li>
+    <li><strong>Review the full changelog</strong> in NetBox for a complete audit trail of all automated changes.</li>
+  </ul>
+</div>
+
 <div class="footer">
-  Generated by Ansible Automation Platform from NetBox Source of Truth &nbsp;|&nbsp;
+  Generated by Ansible Automation Platform from NetBox Source of Truth &nbsp;|&nbsp; {{ ansible_date_time.iso8601 }} &nbsp;|&nbsp;
   <strong style="color: #00C2A8;">NetBox Labs</strong>
 </div>
 

@@ -27,7 +27,6 @@
     report_dir: "{{ playbook_dir }}/reports"
 
   tasks:
-
     - name: Create report directory
       ansible.builtin.file:
         path: "{{ report_dir }}"
@@ -170,6 +169,7 @@
         a_site: "{{ a_side_site }}"
         z_site: "{{ z_side_site }}"
         candidates: "{{ backup_candidates }}"
+        netbox_base_url: "{{ netbox_url }}"
 
     - name: Report generated
       ansible.builtin.debug:
@@ -183,7 +183,6 @@
   gather_facts: false
 
   tasks:
-
     - name: Skip if no report server configured
       ansible.builtin.meta: end_play
       when: report_server_host | default('') | length == 0
@@ -203,7 +202,6 @@
   gather_facts: false
 
   tasks:
-
     - name: Ensure web root exists
       ansible.builtin.file:
         path: /var/www/html

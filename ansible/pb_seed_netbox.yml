@@ -141,8 +141,8 @@
             - dd
         state: present
       loop:
-        - { cid: "IPLC-GB-AT-PRI", status: "Active", commit_rate: 10000 }
-        - { cid: "IPLC-GB-AT-SEC", status: "Offline", commit_rate: 5000 }
+        - { cid: "IPLC-GB-AT-PRI", status: "Active", commit_rate: 10000000 }
+        - { cid: "IPLC-GB-AT-SEC", status: "Offline", commit_rate: 5000000 }
       loop_control:
         label: "{{ item.cid }}"
 
