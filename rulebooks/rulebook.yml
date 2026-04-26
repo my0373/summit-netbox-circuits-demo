@@ -2,11 +2,16 @@
 # EDA Rulebook: NetBox Circuit Failover
 #
 # Listens for NetBox webhook events via an EDA event stream.
-# When a circuit tagged 'dd' is set to offline or failed,
-# triggers the Circuit Failover job template in AAP controller.
+# When a circuit is set to offline or failed, triggers the
+# Circuit Failover Workflow in Ansible Automation Platform.
 #
-# Event stream source: configured in EDA platform (HTTP endpoint).
-# NetBox webhook posts circuit change events to that endpoint.
+# Event-Driven Ansible receives events from NetBox via webhook,
+# evaluates conditions, and launches the AAP workflow automatically.
+#
+# NetBox 4.5 default webhook payload structure:
+#   event.payload.object_type = "circuits.circuit"
+#   event.payload.data.status.value = "offline" | "active" | "failed"
+#   event.payload.data.cid = "IPLC-GB-AT-PRI"
 
 - name: NetBox Circuit Failover
   hosts: all
@@ -17,25 +22,13 @@
 
   rules:
 
-    - name: Circuit set to offline — trigger failover
+    - name: Circuit failure detected — trigger failover workflow
       condition: >
-        event.payload.model == "circuit" and
-        event.payload.data.status.value == "offline"
+        event.payload.object_type == "circuits.circuit" and
+        event.payload.data.status.value in ["offline", "failed"]
       action:
-        run_job_template:
-          name: "Circuit Failover"
-          organization: "Summit"
-          job_args:
-            extra_vars:
-              failed_circuit: "{{ event.payload.data.cid }}"
-
-    - name: Circuit set to failed — trigger failover
-      condition: >
-        event.payload.model == "circuit" and
-        event.payload.data.status.value == "failed"
-      action:
-        run_job_template:
-          name: "Circuit Failover"
+        run_workflow_template:
+          name: "Circuit Failover Workflow"
           organization: "Summit"
           job_args:
             extra_vars:
