@@ -1,0 +1,193 @@
+---
+# pb_setup_local_netbox.yml
+#
+# Deploys a local NetBox instance using podman compose for integration
+# testing. Clones netbox-docker, starts the stack, creates an admin user
+# and API token, then writes the .env file for playbook testing.
+#
+# Prerequisites:
+#   - podman and podman-compose installed
+#   - Internet access to pull container images
+#
+# Usage:
+#   ansible-playbook ansible/pb_setup_local_netbox.yml
+#
+# Teardown:
+#   ansible-playbook ansible/pb_setup_local_netbox.yml -e teardown=true
+
+- name: Deploy local NetBox for testing
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    netbox_docker_dir: "{{ playbook_dir }}/../tmp/netbox-docker"
+    netbox_docker_repo: "https://github.com/netbox-community/netbox-docker.git"
+    netbox_docker_branch: "release"
+    netbox_port: 8000
+    netbox_admin_user: admin
+    netbox_admin_password: admin
+    netbox_admin_email: admin@example.com
+    env_file: "{{ playbook_dir }}/../.env"
+    teardown: false
+
+  tasks:
+
+    # ── Teardown path ─────────────────────────────────────────────────────────
+
+    - name: Teardown local NetBox
+      when: teardown | bool
+      block:
+        - name: Stop and remove containers
+          ansible.builtin.command:
+            cmd: podman compose down -v
+            chdir: "{{ netbox_docker_dir }}"
+          changed_when: true
+          failed_when:
+            - teardown_result.rc != 0
+            - "'no such file or directory' not in (teardown_result.stderr | lower)"
+            - "'no container' not in (teardown_result.stderr | lower)"
+          register: teardown_result
+
+        - name: Remove netbox-docker directory
+          ansible.builtin.file:
+            path: "{{ netbox_docker_dir }}"
+            state: absent
+
+        - name: End play after teardown
+          ansible.builtin.meta: end_play
+
+    # ── Setup path ────────────────────────────────────────────────────────────
+
+    - name: Create tmp directory
+      ansible.builtin.file:
+        path: "{{ playbook_dir }}/../tmp"
+        state: directory
+        mode: "0755"
+
+    - name: Clone netbox-docker
+      ansible.builtin.git:
+        repo: "{{ netbox_docker_repo }}"
+        dest: "{{ netbox_docker_dir }}"
+        version: "{{ netbox_docker_branch }}"
+        depth: 1
+        force: true
+
+    - name: Create docker-compose.override.yml
+      ansible.builtin.copy:
+        dest: "{{ netbox_docker_dir }}/docker-compose.override.yml"
+        mode: "0644"
+        content: |
+          services:
+            netbox:
+              ports:
+                - "{{ netbox_port }}:8080"
+
+    - name: Start NetBox stack
+      ansible.builtin.command:
+        cmd: podman compose up -d
+        chdir: "{{ netbox_docker_dir }}"
+      changed_when: true
+
+    - name: Wait for NetBox to be ready
+      ansible.builtin.uri:
+        url: "http://localhost:{{ netbox_port }}/login/"
+        method: GET
+        status_code: 200
+      register: netbox_health
+      until: netbox_health.status == 200
+      retries: 36
+      delay: 10
+
+    # ── Create admin user ─────────────────────────────────────────────────────
+
+    - name: Create superuser
+      ansible.builtin.command:
+        cmd: >-
+          podman compose exec
+          -e DJANGO_SUPERUSER_PASSWORD={{ netbox_admin_password }}
+          netbox /opt/netbox/netbox/manage.py createsuperuser
+          --no-input
+          --username {{ netbox_admin_user }}
+          --email {{ netbox_admin_email }}
+        chdir: "{{ netbox_docker_dir }}"
+      register: create_user
+      changed_when: "'Superuser created' in create_user.stdout"
+      failed_when:
+        - create_user.rc != 0
+        - "'already taken' not in create_user.stderr"
+
+    # ── Create API token ──────────────────────────────────────────────────────
+
+    - name: Provision API token via REST
+      ansible.builtin.uri:
+        url: "http://localhost:{{ netbox_port }}/api/users/tokens/provision/"
+        method: POST
+        body_format: json
+        body:
+          username: "{{ netbox_admin_user }}"
+          password: "{{ netbox_admin_password }}"
+          version: 1
+        status_code: 201
+      register: token_result
+
+    - name: Set token fact
+      ansible.builtin.set_fact:
+        netbox_token: "{{ token_result.json.token }}"
+
+    - name: Verify API token works
+      ansible.builtin.uri:
+        url: "http://localhost:{{ netbox_port }}/api/status/"
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+        status_code: 200
+      register: api_check
+
+    - name: Show NetBox version
+      ansible.builtin.debug:
+        msg: "NetBox {{ api_check.json['netbox-version'] }} running on http://localhost:{{ netbox_port }}"
+        verbosity: 0
+
+    # ── Write .env file ───────────────────────────────────────────────────────
+
+    - name: Write .env for local testing
+      ansible.builtin.copy:
+        dest: "{{ env_file }}"
+        mode: "0600"
+        content: |
+          # Local NetBox instance (generated by pb_setup_local_netbox.yml)
+          NETBOX_URL=http://localhost:{{ netbox_port }}
+          NETBOX_TOKEN={{ netbox_token }}
+
+          # Ansible Automation Platform (not needed for local testing)
+          AAP_URL=
+          AAP_USERNAME=
+          AAP_PASSWORD=
+          AAP_TOKEN=
+          EDA_STREAM_TOKEN=
+
+    # ── Summary ───────────────────────────────────────────────────────────────
+
+    - name: Setup complete
+      ansible.builtin.debug:
+        msg: |
+          Local NetBox is ready for testing.
+
+            URL:   http://localhost:{{ netbox_port }}
+            User:  {{ netbox_admin_user }} / {{ netbox_admin_password }}
+            Token: {{ netbox_token }}
+            .env:  written to {{ env_file }}
+
+          Next steps:
+            1. Seed demo data:
+                 ./run-playbook.sh ansible/pb_seed_netbox.yml
+
+            2. Run the test cycle:
+                 ./run-playbook.sh ansible/pb_reset_demo.yml
+                 # Set IPLC-GB-AT-PRI to offline in NetBox UI, then:
+                 ./run-playbook.sh ansible/pb_circuit_failover.yml
+                 ./run-playbook.sh ansible/pb_deploy_report.yml -e "failed_circuit=IPLC-GB-AT-PRI"
+
+            3. Teardown when done:
+                 ansible-playbook ansible/pb_setup_local_netbox.yml -e teardown=true
+        verbosity: 0

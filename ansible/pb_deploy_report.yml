@@ -27,7 +27,6 @@
     report_dir: "{{ playbook_dir }}/reports"
 
   tasks:
-
     - name: Create report directory
       ansible.builtin.file:
         path: "{{ report_dir }}"
@@ -37,71 +36,75 @@
     # ── Re-query current circuit state from NetBox ────────────────────────────
 
     - name: Query failed circuit from NetBox
-      ansible.builtin.uri:
-        url: "{{ netbox_url }}/api/circuits/circuits/?cid={{ failed_circuit }}"
-        headers:
-          Authorization: "Token {{ netbox_token }}"
-        return_content: true
-        validate_certs: false
-      register: failed_result
+      ansible.builtin.set_fact:
+        failed_result: >-
+          {{ query('netbox.netbox.nb_lookup', 'circuits',
+                   api_endpoint=netbox_url,
+                   token=netbox_token,
+                   api_filter='cid=' ~ failed_circuit,
+                   validate_certs=netbox_validate_certs,
+                   raw_data=true) }}
 
     - name: Set primary circuit facts
       ansible.builtin.set_fact:
-        primary: "{{ failed_result.json.results[0] }}"
+        primary: "{{ failed_result | first }}"
 
     - name: Query primary circuit terminations
-      ansible.builtin.uri:
-        url: "{{ netbox_url }}/api/circuits/circuit-terminations/?circuit_id={{ primary.id }}"
-        headers:
-          Authorization: "Token {{ netbox_token }}"
-        return_content: true
-        validate_certs: false
-      register: primary_terms
+      ansible.builtin.set_fact:
+        primary_terms: >-
+          {{ query('netbox.netbox.nb_lookup', 'circuit-terminations',
+                   api_endpoint=netbox_url,
+                   token=netbox_token,
+                   api_filter='circuit_id=' ~ primary.id,
+                   validate_certs=netbox_validate_certs,
+                   raw_data=true) }}
 
     - name: Assert terminations exist for both sides
       ansible.builtin.assert:
         that:
-          - primary_terms.json.results | selectattr('term_side', 'eq', 'A') | list | length > 0
-          - primary_terms.json.results | selectattr('term_side', 'eq', 'Z') | list | length > 0
+          - primary_terms | selectattr('term_side', 'eq', 'A') | list | length > 0
+          - primary_terms | selectattr('term_side', 'eq', 'Z') | list | length > 0
         fail_msg: >-
           Circuit {{ failed_circuit }} (id={{ primary.id }}) is missing A/Z terminations in NetBox.
-          Found {{ primary_terms.json.count }} termination(s):
-          {{ primary_terms.json.results | map(attribute='term_side') | list }}.
+          Found {{ primary_terms | length }} termination(s):
+          {{ primary_terms | map(attribute='term_side') | list }}.
 
     - name: Set A-side and Z-side sites
       ansible.builtin.set_fact:
-        a_side_site: "{{ (primary_terms.json.results | selectattr('term_side', 'eq', 'A') | first).termination }}"
-        z_side_site: "{{ (primary_terms.json.results | selectattr('term_side', 'eq', 'Z') | first).termination }}"
+        a_side_site: "{{ (primary_terms | selectattr('term_side', 'eq', 'A') | first).termination }}"
+        z_side_site: "{{ (primary_terms | selectattr('term_side', 'eq', 'Z') | first).termination }}"
 
     # ── Find the active backup circuit ───────────────────────────────────────
     # The failover playbook has already activated the backup, so we query for
     # active circuits at both sites to find it.
 
     - name: Query active circuits at A-side site
-      ansible.builtin.uri:
-        url: "{{ netbox_url }}/api/circuits/circuits/?site_id={{ a_side_site.id }}&tag=dd&status=active"
-        headers:
-          Authorization: "Token {{ netbox_token }}"
-        return_content: true
-        validate_certs: false
-      register: a_site_circuits
+      ansible.builtin.set_fact:
+        a_site_circuits: >-
+          {{ query('netbox.netbox.nb_lookup', 'circuits',
+                   api_endpoint=netbox_url,
+                   token=netbox_token,
+                   api_filter='site_id=' ~ a_side_site.id ~ ' tag=dd status=active',
+                   validate_certs=netbox_validate_certs,
+                   raw_data=true) }}
 
     - name: Query active circuits at Z-side site
-      ansible.builtin.uri:
-        url: "{{ netbox_url }}/api/circuits/circuits/?site_id={{ z_side_site.id }}&tag=dd&status=active"
-        headers:
-          Authorization: "Token {{ netbox_token }}"
-        return_content: true
-        validate_certs: false
-      register: z_site_circuits
+      ansible.builtin.set_fact:
+        z_site_circuits: >-
+          {{ query('netbox.netbox.nb_lookup', 'circuits',
+                   api_endpoint=netbox_url,
+                   token=netbox_token,
+                   api_filter='site_id=' ~ z_side_site.id ~ ' tag=dd status=active',
+                   validate_certs=netbox_validate_certs,
+                   raw_data=true) }}
 
     - name: Find active backup circuit (present at both sites, not the failed one)
       ansible.builtin.set_fact:
-        z_circuit_ids: "{{ z_site_circuits.json.results | map(attribute='id') | list }}"
+        z_circuit_ids: "{{ z_site_circuits | map(attribute='id') | list }}"
         backup_candidates: >-
           {{
-            a_site_circuits.json.results
-            | selectattr('id', 'in', z_site_circuits.json.results | map(attribute='id') | list)
+            a_site_circuits
+            | selectattr('id', 'in', z_site_circuits | map(attribute='id') | list)
             | rejectattr('id', 'eq', primary.id)
             | list
           }}
@@ -111,42 +114,45 @@
         backup: "{{ backup_candidates | sort(attribute='commit_rate', reverse=true) | first }}"
 
     - name: Query backup circuit terminations
-      ansible.builtin.uri:
-        url: "{{ netbox_url }}/api/circuits/circuit-terminations/?circuit_id={{ backup.id }}"
-        headers:
-          Authorization: "Token {{ netbox_token }}"
-        return_content: true
-        validate_certs: false
-      register: backup_terms
+      ansible.builtin.set_fact:
+        backup_terms: >-
+          {{ query('netbox.netbox.nb_lookup', 'circuit-terminations',
+                   api_endpoint=netbox_url,
+                   token=netbox_token,
+                   api_filter='circuit_id=' ~ backup.id,
+                   validate_certs=netbox_validate_certs,
+                   raw_data=true) }}
 
     - name: Set backup site labels
       ansible.builtin.set_fact:
-        backup_a_site: "{{ (backup_terms.json.results | selectattr('term_side', 'eq', 'A') | first).termination.display }}"
-        backup_z_site: "{{ (backup_terms.json.results | selectattr('term_side', 'eq', 'Z') | first).termination.display }}"
+        backup_a_site: "{{ (backup_terms | selectattr('term_side', 'eq', 'A') | first).termination.display }}"
+        backup_z_site: "{{ (backup_terms | selectattr('term_side', 'eq', 'Z') | first).termination.display }}"
 
     # ── Query routers at both sites ───────────────────────────────────────────
 
     - name: Query routers at A-side site
-      ansible.builtin.uri:
-        url: "{{ netbox_url }}/api/dcim/devices/?site_id={{ a_side_site.id }}&role=router&tag=dd"
-        headers:
-          Authorization: "Token {{ netbox_token }}"
-        return_content: true
-        validate_certs: false
-      register: a_side_routers
+      ansible.builtin.set_fact:
+        a_side_routers: >-
+          {{ query('netbox.netbox.nb_lookup', 'devices',
+                   api_endpoint=netbox_url,
+                   token=netbox_token,
+                   api_filter='site_id=' ~ a_side_site.id ~ ' role=router tag=dd',
+                   validate_certs=netbox_validate_certs,
+                   raw_data=true) }}
 
     - name: Query routers at Z-side site
-      ansible.builtin.uri:
-        url: "{{ netbox_url }}/api/dcim/devices/?site_id={{ z_side_site.id }}&role=router&tag=dd"
-        headers:
-          Authorization: "Token {{ netbox_token }}"
-        return_content: true
-        validate_certs: false
-      register: z_side_routers
+      ansible.builtin.set_fact:
+        z_side_routers: >-
+          {{ query('netbox.netbox.nb_lookup', 'devices',
+                   api_endpoint=netbox_url,
+                   token=netbox_token,
+                   api_filter='site_id=' ~ z_side_site.id ~ ' role=router tag=dd',
+                   validate_certs=netbox_validate_certs,
+                   raw_data=true) }}
 
     - name: Combine router list
       ansible.builtin.set_fact:
-        all_routers: "{{ a_side_routers.json.results + z_side_routers.json.results }}"
+        all_routers: "{{ a_side_routers + z_side_routers }}"
 
     # ── Generate HTML report ──────────────────────────────────────────────────
 
@@ -155,6 +161,7 @@
         src: templates/failover_report.html.j2
         dest: "{{ report_dir }}/failover_report.html"
         mode: "0644"
+        backup: true
       vars:
         primary_a_site: "{{ a_side_site.display }}"
         primary_z_site: "{{ z_side_site.display }}"
@@ -162,10 +169,12 @@
         a_site: "{{ a_side_site }}"
         z_site: "{{ z_side_site }}"
         candidates: "{{ backup_candidates }}"
+        netbox_base_url: "{{ netbox_url }}"
 
     - name: Report generated
       ansible.builtin.debug:
         msg: "Report generated: {{ report_dir }}/failover_report.html"
+        verbosity: 0
 
 # ── Play 2: Register report server (if configured) ────────────────────────────
 
@@ -174,7 +183,6 @@
   gather_facts: false
 
   tasks:
-
     - name: Skip if no report server configured
       ansible.builtin.meta: end_play
       when: report_server_host | default('') | length == 0
@@ -194,7 +202,6 @@
   gather_facts: false
 
   tasks:
-
     - name: Ensure web root exists
       ansible.builtin.file:
         path: /var/www/html
@@ -207,8 +214,10 @@
         src: "{{ playbook_dir }}/reports/failover_report.html"
         dest: /var/www/html/failover_report.html
         mode: "0644"
+        backup: true
       become: true
 
     - name: Report published
       ansible.builtin.debug:
         msg: "Report live at {{ report_url }}"
+        verbosity: 0

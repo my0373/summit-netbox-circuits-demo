@@ -4,3 +4,4 @@
 # In AAP: injected automatically via the NetBox credential type (injects NETBOX_API + NETBOX_TOKEN).
 netbox_url: "{{ lookup('env', 'NETBOX_URL') or lookup('env', 'NETBOX_API') }}"
 netbox_token: "{{ lookup('env', 'NETBOX_TOKEN') }}"
+netbox_validate_certs: false
