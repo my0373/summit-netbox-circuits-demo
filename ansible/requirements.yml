@@ -1,0 +1,9 @@
+---
+# Ansible collection requirements for local runs.
+# In AAP the network-netbox-ee-stable execution environment already includes these.
+# Install locally with: ansible-galaxy collection install -r ansible/requirements.yml
+collections:
+  - name: cisco.ios
+    version: ">=9.0.0"
+  - name: ansible.netcommon
+    version: ">=7.0.0"

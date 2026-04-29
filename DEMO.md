@@ -18,18 +18,18 @@ Presenter tells Copilot the circuit has failed
         ↓
 NetBox Copilot sets IPLC-GB-AT-PRI → offline
         ↓
-NetBox event rule fires → webhook to AAP
+NetBox event rule fires → webhook to EDA event stream
         ↓
-AAP launches Circuit Failover Workflow
+EDA rulebook triggers Circuit Failover Workflow in AAP
         ↓
-  Step 1: Circuit Failover playbook
+  Step 1: Circuit Failover playbook (pb_circuit_failover.yml)
     - Queries NetBox for the failed circuit and its sites
     - Discovers active backup circuits between the same sites
     - Selects best backup by committed bandwidth
-    - Simulates router config push (no real devices in demo)
+    - Pushes real IOS config to gb-brs-rtr-01 (Cisco C8000V EC2)
     - Updates NetBox: primary → offline, backup → active
         ↓
-  Step 2: Deploy Report playbook
+  Step 2: Deploy Report playbook (pb_deploy_report.yml)
     - Re-queries NetBox for current circuit state
     - Generates HTML incident report from Jinja2 template
     - Deploys report to the report web server over SSH
@@ -44,28 +44,36 @@ Presenter asks Claude (via NetBox MCP): "What is the status of IPLC-GB-AT-PRI?"
 ## Architecture
 
 ```
-NetBox Cloud                    AAP / Automation
-─────────────────               ──────────────────────────────────────────
-┌─────────────┐                 ┌──────────────────────────────────────┐
-│   Copilot   │ PATCH circuit   │   Circuit Failover Workflow           │
-│   (AI chat) │─── status ──→  │                                      │
-└─────────────┘   = offline     │  ┌─────────────────────────────────┐ │
-                                │  │ Step 1: Circuit Failover         │ │
-┌─────────────┐                 │  │  • Query NetBox for circuit/sites│ │
-│   Webhooks  │  POST           │  │  • Find best backup circuit      │ │
-│  + Event    │──── launch ──→  │  │  • Simulate router config push  │ │
-│   Rules     │  workflow       │  │  • PATCH NetBox: update statuses │ │
-└─────────────┘                 │  └────────────────┬────────────────┘ │
-                                │                   │ on success        │
-┌─────────────┐                 │  ┌────────────────▼────────────────┐ │
-│   Visual    │ ← live update   │  │ Step 2: Deploy Report            │ │
-│  Explorer   │   (map redraws) │  │  • Re-query NetBox state         │ │
-└─────────────┘                 │  │  • Generate HTML report (Jinja2) │ │
-                                │  │  • Deploy to report web server   │ │
-┌─────────────┐                 │  └─────────────────────────────────┘ │
-│  NetBox MCP │ ← status check  └──────────────────────────────────────┘
-│   (Claude)  │   at end of demo
-└─────────────┘
+NetBox Cloud                 EDA + AAP / Automation
+─────────────────            ─────────────────────────────────────────────────
+┌─────────────┐              ┌───────────────────────────────────────────────┐
+│   Copilot   │ PATCH        │                                               │
+│   (AI chat) │─── circuit ──┼──→ EDA event stream                           │
+└─────────────┘   = offline  │         ↓ rulebook: run_workflow_template      │
+                             │   Circuit Failover Workflow                    │
+┌─────────────┐  POST to EDA │                                               │
+│  Event Rule │──────────────┼──→  ┌─────────────────────────────────────┐   │
+│  + Webhook  │  event stream│     │ Step 1: Circuit Failover             │   │
+└─────────────┘              │     │  • Query NetBox for circuit/sites    │   │
+                             │     │  • Find best backup circuit          │   │
+┌─────────────┐              │     │  • Push IOS config to C8000V router  │   │
+│   Visual    │ ← live map   │     │  • PATCH NetBox: update statuses     │   │
+│  Explorer   │   update     │     └─────────────────┬───────────────────┘   │
+└─────────────┘              │                       │ on success             │
+                             │     ┌─────────────────▼───────────────────┐   │
+┌─────────────┐              │     │ Step 2: Deploy Report                │   │
+│  NetBox MCP │ ← status     │     │  • Re-query NetBox state             │   │
+│   (Claude)  │   check      │     │  • Generate HTML report (Jinja2)     │   │
+└─────────────┘              │     │  • Deploy to report web server       │   │
+                             │     └─────────────────────────────────────┘   │
+                             └───────────────────────────────────────────────┘
+                                              ↓
+                                   ┌──────────────────┐
+                                   │  Cisco C8000V     │
+                                   │  gb-brs-rtr-01    │
+                                   │  (EC2 eu-west-2)  │
+                                   │  cisco.ios_config │
+                                   └──────────────────┘
 ```
 
 ## What the Automation Does
@@ -78,8 +86,13 @@ NetBox Cloud                    AAP / Automation
 4. Queries all active, `dd`-tagged circuits at both sites
 5. Finds circuits present at both ends (excluding the failed one) — these are backup candidates
 6. Selects the backup with the highest committed bandwidth
-7. Simulates pushing a failover routing config to the routers at both sites
-8. PATCHes NetBox: primary circuit → offline, backup circuit → active
+7. Registers `gb-brs-rtr-01` in dynamic inventory using its NetBox primary IP (`18.170.83.110`)
+8. Pushes real IOS config via `cisco.ios.ios_config`:
+   - Removes: `no ip route 0.0.0.0 0.0.0.0 172.16.0.1`
+   - Adds: `ip route 0.0.0.0 0.0.0.0 172.16.1.1`
+9. PATCHes NetBox: primary circuit → offline, backup circuit → active
+
+Z-side router (`us-atl-rtr-01`) is logged but not configured — no EC2 instance at Z-side. This is noted in the output with a `[DEMO]` tag.
 
 ### Step 2 — Deploy Report (`pb_deploy_report.yml`)
 
@@ -91,36 +104,50 @@ NetBox Cloud                    AAP / Automation
 
 ### Reset (`pb_reset_demo.yml`)
 
-Fetches all circuits tagged `dd` and PATCHes any non-active ones back to `active`. Safe to run between demo attempts.
+1. Fetches all circuits tagged `dd` and PATCHes any non-active ones back to `active`
+2. Sets `IPLC-GB-AT-SEC` to `offline` (the backup that was activated during failover)
+3. Registers `gb-brs-rtr-01` in dynamic inventory
+4. Restores the primary default route on the router: `ip route 0.0.0.0 0.0.0.0 172.16.0.1`
 
-## Key Points to Make During the Demo
-
-- **NetBox is the trigger, not a passive CMDB.** One status change in Copilot kicks off the entire automation chain.
-- **No hardcoded backup mappings.** The playbook discovers the backup dynamically from NetBox. Add a new circuit in NetBox and it's automatically a candidate next time.
-- **Two-step workflow.** The circuit update and report deployment are separate, auditable steps — visible in AAP's job history.
-- **NetBox Visual Explorer updates live.** The map reflects the new topology immediately after AAP writes back.
-- **The MCP server confirms it.** At the end, Claude can query the NetBox MCP server directly to confirm circuit statuses — no UI required.
+Safe to run between demo attempts. Visual Explorer returns to the starting state.
 
 ## Infrastructure
 
 | Component | Details |
 |---|---|
-| NetBox Cloud | `ryvr4514.cloud.netboxapp.com` — circuits, devices, Visual Explorer, Copilot, webhooks |
-| AAP Controller | `netbox-aap25.demoredhat.com` — workflow, job templates, project, inventory |
+| NetBox Cloud | `app.netboxlabs.com` — circuits, devices, [Visual Explorer](https://app.netboxlabs.com/visual-explorer), Copilot, event rules |
+| AAP 2.5 Controller | `netbox-aap25.demoredhat.com` — workflow, job templates, EDA, credentials |
+| EDA | `network-netbox-de` DE, `network-netbox-ee-stable` EE (both pre-provisioned on AAP) |
 | Report server | AWS EC2 t3.micro (eu-west-2), nginx HTTPS, SSH on port 2222 |
 | MCP server | AWS EC2 t3.micro (eu-west-2), netboxlabs/netbox-mcp-server, SSH stdio |
+| Cisco router | AWS EC2 c5n.large (eu-west-2), Cisco C8000V IOS-XE 17.15.x — `gb-brs-rtr-01` |
 
 ## Trigger Mechanism
 
-NetBox 4.x uses **event rules** rather than standalone webhooks. The event rule watches for any circuit update and fires a webhook to the AAP workflow launch endpoint:
+NetBox 4.x uses **event rules** rather than standalone webhooks. The event rule watches for any circuit update and fires a webhook to the **EDA event stream** URL:
 
 ```
-POST /api/controller/v2/workflow_job_templates/{id}/launch/
-Authorization: Bearer <aap_token>
-{"extra_vars": {"failed_circuit": "{{ data.cid }}"}}
+POST https://netbox-aap25.demoredhat.com/eda-event-streams/api/eda/v1/external_event_stream/<id>/post/
+Authorization: Bearer <eda_stream_token>
 ```
 
-The circuit CID is extracted from the webhook payload via NetBox's Jinja2 `body_template`. The playbook then checks the circuit's actual status in NetBox and exits if it's not offline — handling any spurious triggers safely.
+EDA's rulebook (`rulebooks/rulebook.yml`) listens on the event stream and calls `run_workflow_template` to launch the `Circuit Failover Workflow` in AAP. The `failed_circuit` extra var is extracted from `{{ event.payload.data.cid }}` in the rulebook.
+
+The playbook then checks the circuit's actual status in NetBox and exits if it's not offline — handling any spurious triggers safely.
+
+## Router Credentials
+
+The Cisco C8000V uses a local IOS user provisioned via cloud-init userdata:
+
+- **Username**: `iosuser`
+- **Password**: `iospass`
+- **AAP Credential**: `Summit Demo Router` (built-in Network credential type — injects `ANSIBLE_NET_USERNAME` and `ANSIBLE_NET_PASSWORD`)
+
+To SSH in manually for debugging:
+
+```bash
+ssh iosuser@18.170.83.110
+```
 
 ## Resetting Between Runs
 
@@ -128,4 +155,4 @@ The circuit CID is extracted from the webhook payload via NetBox's Jinja2 `body_
 ./reset.sh
 ```
 
-This runs `pb_reset_demo.yml`, which sets all `dd`-tagged circuits back to `active`. Visual Explorer will return to the starting state with all circuits shown.
+This runs `pb_reset_demo.yml`, which resets all `dd`-tagged circuits in NetBox and restores the primary default route on the Cisco router. Visual Explorer returns to the starting state.

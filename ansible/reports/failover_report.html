@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Circuit Failover Report — IPLC-GB-PH-PRI</title>
+<title>Circuit Failover Report — IPLC-GB-AT-PRI</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0D1B2A; color: #e2e8f0; padding: 2rem; }
@@ -64,7 +64,7 @@
 <div class="header">
   <div class="header-text">
     <h1>Circuit Failover Report</h1>
-    <p class="subtitle">GB-Bristol &harr; PH-Manila-01 &nbsp;|&nbsp; 2026-04-05T11:54:37Z &nbsp;|&nbsp; Source: NetBox SoT</p>
+    <p class="subtitle">GB-Bristol &harr; US-Atlanta &nbsp;|&nbsp; 2026-04-26T15:14:39Z &nbsp;|&nbsp; Source: NetBox SoT</p>
     <span class="badge-automated">Fully Automated</span>
   </div>
 </div>
@@ -76,49 +76,41 @@
 
     <div class="circuit failed">
       <div class="label">Failed Circuit</div>
-      <div class="cid">IPLC-GB-PH-PRI</div>
-      <div class="field"><span class="key">Provider</span><span class="val">Pacific Link Telecom</span></div>
+      <div class="cid">IPLC-GB-AT-PRI</div>
+      <div class="field"><span class="key">Provider</span><span class="val">Summit Carrier Services</span></div>
       <div class="field"><span class="key">Type</span><span class="val">IPLC</span></div>
-      <div class="field"><span class="key">Status</span><span class="val"><span class="badge offline">Deprovisioning</span></span></div>
+      <div class="field"><span class="key">Status</span><span class="val"><span class="badge offline">Offline</span></span></div>
       <div class="field"><span class="key">Committed Rate</span><span class="val">1000 Mbps</span></div>
       <div class="field"><span class="key">A-side</span><span class="val">GB-Bristol</span></div>
-      <div class="field"><span class="key">Z-side</span><span class="val">PH-Manila-01</span></div>
-      <div class="field"><span class="key">Monthly Cost</span><span class="val">$14500</span></div>
+      <div class="field"><span class="key">Z-side</span><span class="val">US-Atlanta</span></div>
+      <div class="field"><span class="key">Monthly Cost</span><span class="val">$11500</span></div>
       <div class="field"><span class="key">SLA</span><span class="val">99.95% / 4h MTTR</span></div>
     </div>
 
     <div class="circuit backup">
       <div class="label">Active Backup</div>
-      <div class="cid">IPLC-GB-PH-SEC</div>
+      <div class="cid">IPLC-GB-AT-SEC</div>
       <div class="field"><span class="key">Provider</span><span class="val">Meridian Global Transit</span></div>
       <div class="field"><span class="key">Type</span><span class="val">IPLC</span></div>
       <div class="field"><span class="key">Status</span><span class="val"><span class="badge active">Active</span></span></div>
-      <div class="field"><span class="key">Committed Rate</span><span class="val">1000 Mbps</span></div>
+      <div class="field"><span class="key">Committed Rate</span><span class="val">500 Mbps</span></div>
       <div class="field"><span class="key">A-side</span><span class="val">GB-Bristol</span></div>
-      <div class="field"><span class="key">Z-side</span><span class="val">PH-Manila-01</span></div>
-      <div class="field"><span class="key">Monthly Cost</span><span class="val">$12800</span></div>
-      <div class="field"><span class="key">SLA</span><span class="val">99.95% / 4h MTTR</span></div>
+      <div class="field"><span class="key">Z-side</span><span class="val">US-Atlanta</span></div>
+      <div class="field"><span class="key">Monthly Cost</span><span class="val">$8200</span></div>
+      <div class="field"><span class="key">SLA</span><span class="val">99.9% / 8h MTTR</span></div>
     </div>
   </div>
 </div>
 
 <!-- Backup Selection -->
 <div class="card">
-  <h2>Backup Selection — 3 Candidate(s) Evaluated</h2>
+  <h2>Backup Selection — 1 Candidate(s) Evaluated</h2>
   <p style="font-size: 0.82rem; color: #B0BCCC; margin-bottom: 0.75rem;">
-    Backup selected automatically from NetBox — highest commit rate between GB-Bristol and PH-Manila-01.
+    Backup selected automatically from NetBox — highest commit rate between GB-Bristol and US-Atlanta.
   </p>
   <ul class="candidates">
     <li class="selected">
-      <span class="cid-label">IPLC-GB-PH-SEC ✓ selected</span>
-      <span class="meta">Meridian Global Transit &mdash; 1000 Mbps</span>
-    </li>
-    <li class="">
-      <span class="cid-label">IPLC-GB-PH-DR</span>
-      <span class="meta">Archipelago Networks &mdash; 500 Mbps</span>
-    </li>
-    <li class="">
-      <span class="cid-label">MPLS-GB-PH-01</span>
+      <span class="cid-label">IPLC-GB-AT-SEC ✓ selected</span>
       <span class="meta">Meridian Global Transit &mdash; 500 Mbps</span>
     </li>
   </ul>
@@ -132,20 +124,20 @@
   </p>
   <ul class="router-list">
     <li>
-      <span class="name">gb-brs-rtr-01</span>
-      <span class="site">GB-Bristol</span>
-    </li>
-    <li>
       <span class="name">gb-brs-rtr-02</span>
-      <span class="site">GB-Bristol</span>
+      <span class="site">GB-Bristol · Gi0/0/6</span>
     </li>
     <li>
-      <span class="name">ph-mnl-rtr-01</span>
-      <span class="site">PH-Manila-01</span>
+      <span class="name">us-atl-rtr-01</span>
+      <span class="site">US-Atlanta · Gi0/0/0</span>
     </li>
     <li>
-      <span class="name">ph-mnl-rtr-02</span>
-      <span class="site">PH-Manila-01</span>
+      <span class="name">gb-brs-rtr-01</span>
+      <span class="site">GB-Bristol · Gi0/0/0</span>
+    </li>
+    <li>
+      <span class="name">us-atl-rtr-02</span>
+      <span class="site">US-Atlanta · Gi0/0/0</span>
     </li>
   </ul>
 </div>
@@ -157,34 +149,49 @@
 
     <div class="step detect">
       <h3>Circuit failure detected</h3>
-      <p>NetBox Copilot set <strong>IPLC-GB-PH-PRI</strong> to Deprovisioning.
+      <p>NetBox Copilot set <strong>IPLC-GB-AT-PRI</strong> to Offline.
          Webhook fired to Ansible Automation Platform.</p>
     </div>
 
     <div class="step discover">
       <h3>Backup path discovered from NetBox SoT</h3>
-      <p>NetBox identified <strong>IPLC-GB-PH-SEC</strong> via Meridian Global Transit
-         as the highest-capacity available path between GB-Bristol and PH-Manila-01.</p>
+      <p>NetBox identified <strong>IPLC-GB-AT-SEC</strong> via Meridian Global Transit
+         as the highest-capacity available path between GB-Bristol and US-Atlanta.</p>
     </div>
 
     <div class="step push">
       <h3>Router configuration updated</h3>
-      <p>Failover route pushed to <strong>gb-brs-rtr-01</strong> (GB-Bristol):</p>
+      <p>Routers identified via NetBox cable connections:</p>
+      <p style="margin-top: 0.75rem;">
+        <strong>gb-brs-rtr-02</strong>
+        <span style="color: #B0BCCC;">(GB-Bristol · Gi0/0/6)</span>
+        — IPLC-GB-AT-PRI A-side
+        <span style="color: #B0BCCC;">[simulated]</span>      </p>
+      <p style="margin-top: 0.75rem;">
+        <strong>us-atl-rtr-01</strong>
+        <span style="color: #B0BCCC;">(US-Atlanta · Gi0/0/0)</span>
+        — IPLC-GB-AT-PRI Z-side
+        <span style="color: #B0BCCC;">[simulated]</span>      </p>
+      <p style="margin-top: 0.75rem;">
+        <strong>gb-brs-rtr-01</strong>
+        <span style="color: #B0BCCC;">(GB-Bristol · Gi0/0/0)</span>
+        — IPLC-GB-AT-SEC A-side
+        <span style="color: #00C2A8;">[live config push]</span>      </p>
       <div class="cmd">conf t
 no ip route 0.0.0.0 0.0.0.0 172.16.0.1   ! remove primary default route
 ip route 0.0.0.0 0.0.0.0 172.16.1.1       ! activate backup route
 end</div>
-      <p style="margin-top: 0.75rem;">And to <strong>gb-brs-rtr-02</strong> (GB-Bristol):</p>
-      <div class="cmd">conf t
-no ip route 0.0.0.0 0.0.0.0 172.16.0.2
-ip route 0.0.0.0 0.0.0.0 172.16.1.2
-end</div>
+      <p style="margin-top: 0.75rem;">
+        <strong>us-atl-rtr-02</strong>
+        <span style="color: #B0BCCC;">(US-Atlanta · Gi0/0/0)</span>
+        — IPLC-GB-AT-SEC Z-side
+        <span style="color: #B0BCCC;">[simulated]</span>      </p>
     </div>
 
     <div class="step update">
       <h3>NetBox Source of Truth updated</h3>
       <p>
-        <strong>IPLC-GB-PH-PRI</strong> marked as Deprovisioning.
+        <strong>IPLC-GB-AT-PRI</strong> marked as Offline.
         Visual Explorer WAN map updated in real-time.
         Full change log recorded in NetBox.
       </p>
