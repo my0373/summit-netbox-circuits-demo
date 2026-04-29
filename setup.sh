@@ -9,10 +9,6 @@ else
     echo ".env created — fill in your credentials before running the demo."
 fi
 
-# Install Python dependencies
-echo "Installing Python dependencies with uv..."
-uv sync
-
 # Create infra.yml placeholder if not present
 if [ ! -f ansible/vars/infra.yml ]; then
     cp ansible/vars/infra.yml.example ansible/vars/infra.yml
@@ -30,7 +26,7 @@ cat << 'NEXTSTEPS'
        AAP_PASSWORD, EDA_STREAM_TOKEN
 
   2. Configure AAP and EDA (idempotent — safe to re-run):
-       uv run --with requests python setup_aap.py
+       ./run-playbook.sh ansible/pb_setup_aap.yml
 
   3. Provision AWS infrastructure (report server + MCP VM):
        ./setup_infra.sh

@@ -83,7 +83,7 @@ cat << 'NEXTSTEPS'
 
   To do a full reset from scratch:
     ./setup.sh
-    uv run --with requests python setup_aap.py
+    ./run-playbook.sh ansible/pb_setup_aap.yml
     ./setup_infra.sh
     ./reset.sh
 

@@ -9,7 +9,7 @@
 #
 # Prerequisites:
 #   1. Run ./setup.sh (creates .env)
-#   2. Run: uv run --with requests python setup_aap.py (configures AAP)
+#   2. Run: ./run-playbook.sh ansible/pb_setup_aap.yml (configures AAP)
 #
 # Usage: ./setup_infra.sh
 
@@ -114,10 +114,10 @@ echo "========================================================"
 echo "  Step 4: Register report server with AAP"
 echo "========================================================"
 
-uv run --with requests python setup_aap.py \
-  --report-server-ip "$REPORT_IP" \
-  --report-server-port "$SSH_PORT" \
-  --private-key-path "$PRIVATE_KEY_PATH"
+./run-playbook.sh ansible/pb_setup_aap.yml \
+  -e report_server_ip="$REPORT_IP" \
+  -e report_server_port="$SSH_PORT" \
+  -e private_key_path="$PRIVATE_KEY_PATH"
 
 echo ""
 echo "========================================================"

@@ -110,6 +110,7 @@ See [SETUP.md](SETUP.md) for full setup instructions including AAP configuration
 
 ```
 ansible/
+  pb_setup_aap.yml          # Idempotent AAP + EDA + NetBox configuration playbook
   pb_circuit_failover.yml   # Workflow Step 1: find backup, update NetBox
   pb_deploy_report.yml      # Workflow Step 2: generate and publish HTML report
   pb_reset_demo.yml         # Reset all dd-tagged circuits to starting state
@@ -123,12 +124,11 @@ ansible/
   inventory/
     localhost.yml            # Localhost inventory for local execution
 collections/
-  requirements.yml          # netbox.netbox collection dependency
+  requirements.yml          # netbox.netbox, ansible.controller, ansible.eda
 infra/
   main.tf                   # Terraform — EC2 report server + MCP server
 rulebooks/
   rulebook.yml              # EDA rulebook for Event-Driven Ansible
-setup_aap.py                # Idempotent AAP + NetBox configuration script
 setup.sh / reset.sh         # Helper scripts
 DEMO.md                     # Full scenario and architecture reference
 SETUP.md                    # Setup and configuration guide

@@ -28,8 +28,8 @@
         event.payload.data.status.value in ["offline", "failed"]
       action:
         run_workflow_template:
-          name: "Circuit Failover Workflow"
-          organization: "Summit"
+          name: "SummitCollection Circuit Failover Workflow"
+          organization: "SummitCollection"
           job_args:
             extra_vars:
               failed_circuit: "{{ event.payload.data.cid }}"

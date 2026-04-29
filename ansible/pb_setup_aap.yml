@@ -1,0 +1,547 @@
+---
+# pb_setup_aap.yml
+#
+# Configures all AAP Controller, EDA, and NetBox resources for the
+# Summit NetBox Circuits Demo.
+#
+# Replaces setup_aap.py — no Python/uv dependency required.
+#
+# What this creates:
+#   Controller:
+#     - NetBox credential (Summit Demo)
+#     - Localhost inventory + host
+#     - GitHub project
+#     - Job template: Circuit Failover
+#     - Job template: Deploy Report
+#     - Job template: Reset Demo
+#     - Workflow template: Circuit Failover Workflow (Failover → Report)
+#
+#   EDA:
+#     - Decision environment (or reuse existing)
+#     - EDA project (same GitHub repo)
+#     - AAP controller credential (for run_job_template)
+#     - Token event stream credential
+#     - Event stream (HTTP endpoint NetBox posts to)
+#     - Rulebook activation
+#
+#   NetBox:
+#     - Webhook pointing to the AAP workflow launch endpoint
+#     - Event rule for circuit updates
+#
+# Usage:
+#   source .env
+#   ./run-playbook.sh ansible/pb_setup_aap.yml
+#
+# With report server (after setup_infra.sh):
+#   ./run-playbook.sh ansible/pb_setup_aap.yml \
+#     -e report_server_ip=1.2.3.4 \
+#     -e report_server_port=2222 \
+#     -e private_key_path=infra/keys/summit-demo.pem
+
+- name: Configure AAP and NetBox for Summit demo
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars_files:
+    - vars/netbox_creds.yml
+
+  vars:
+    aap_org_name: "SummitCollection"
+    github_repo: "https://github.com/my0373/summit-netbox-circuits-demo"
+    github_branch: "main"
+    de_image: "registry.redhat.io/ansible-automation-platform-26/de-supported-rhel9:latest"
+    eda_stream_token: "{{ lookup('env', 'EDA_STREAM_TOKEN') }}"
+    aap_token: "{{ lookup('env', 'AAP_TOKEN') }}"
+    # Controller resource names
+    netbox_cred_name: "{{ aap_org_name }} NetBox Cloud"
+    inventory_name: "{{ aap_org_name }} Localhost"
+    controller_project_name: "{{ aap_org_name }} NetBox Circuits Demo"
+    jt_failover_name: "{{ aap_org_name }} Circuit Failover"
+    jt_report_name: "{{ aap_org_name }} Deploy Report"
+    jt_reset_name: "{{ aap_org_name }} Reset Demo"
+    workflow_name: "{{ aap_org_name }} Circuit Failover Workflow"
+    report_server_cred_name: "{{ aap_org_name }} Report Server SSH"
+    # EDA resource names
+    de_name: "{{ aap_org_name }} Decision Environment"
+    eda_project_name: "{{ aap_org_name }} EDA Project"
+    eda_aap_cred_name: "{{ aap_org_name }} EDA AAP Controller"
+    eda_stream_cred_name: "{{ aap_org_name }} EDA Webhook Token"
+    eda_event_stream_name: "{{ aap_org_name }} EDA Circuit Events"
+    eda_activation_name: "{{ aap_org_name }} EDA Circuit Failover"
+    # NetBox resource names
+    netbox_webhook_name: "{{ aap_org_name }} AAP Circuit Failover"
+
+  environment:
+    CONTROLLER_HOST: "{{ lookup('env', 'AAP_URL') }}"
+    CONTROLLER_USERNAME: "{{ lookup('env', 'AAP_USERNAME') }}"
+    CONTROLLER_PASSWORD: "{{ lookup('env', 'AAP_PASSWORD') }}"
+    CONTROLLER_VERIFY_SSL: "false"
+    AAP_HOSTNAME: "{{ lookup('env', 'AAP_URL') }}"
+    AAP_USERNAME: "{{ lookup('env', 'AAP_USERNAME') }}"
+    AAP_PASSWORD: "{{ lookup('env', 'AAP_PASSWORD') }}"
+    AAP_VALIDATE_CERTS: "false"
+
+  tasks:
+
+    # ── Validate prerequisites ────────────────────────────────────────────────
+
+    - name: Validate required environment variables
+      ansible.builtin.assert:
+        that:
+          - lookup('env', 'AAP_URL') | length > 0
+          - lookup('env', 'AAP_USERNAME') | length > 0
+          - lookup('env', 'AAP_PASSWORD') | length > 0
+          - netbox_url | length > 0
+          - netbox_token | length > 0
+          - eda_stream_token | length > 0
+        fail_msg: >-
+          Missing required environment variables. Source your .env file first.
+          Required: AAP_URL, AAP_USERNAME, AAP_PASSWORD, NETBOX_URL,
+          NETBOX_TOKEN, EDA_STREAM_TOKEN
+
+    # ── Controller: NetBox credential type ──────────────────────────────────
+
+    - name: Create NetBox credential type
+      ansible.controller.credential_type:
+        name: "NetBox"
+        kind: cloud
+        inputs:
+          fields:
+            - id: NETBOX_API
+              type: string
+              label: "NetBox URL"
+              help_text: "Base URL of the NetBox instance"
+            - id: NETBOX_TOKEN
+              type: string
+              label: "API Token"
+              secret: true
+          required:
+            - NETBOX_API
+            - NETBOX_TOKEN
+        injectors:
+          env:
+            NETBOX_API: "{{ '{{' }} NETBOX_API {{ '}}' }}"
+            NETBOX_URL: "{{ '{{' }} NETBOX_API {{ '}}' }}"
+            NETBOX_TOKEN: "{{ '{{' }} NETBOX_TOKEN {{ '}}' }}"
+        state: present
+
+    # ── Controller: NetBox credential ─────────────────────────────────────────
+
+    - name: Create NetBox credential
+      ansible.controller.credential:
+        name: "{{ netbox_cred_name }}"
+        organization: "{{ aap_org_name }}"
+        credential_type: "NetBox"
+        inputs:
+          NETBOX_API: "{{ netbox_url }}"
+          NETBOX_TOKEN: "{{ netbox_token }}"
+        state: present
+
+    # ── Controller: Inventory ─────────────────────────────────────────────────
+
+    - name: Create localhost inventory
+      ansible.controller.inventory:
+        name: "{{ inventory_name }}"
+        organization: "{{ aap_org_name }}"
+        description: "Localhost inventory for Summit demo playbooks"
+        state: present
+
+    # ── Controller: Localhost host ────────────────────────────────────────────
+
+    - name: Create localhost host in inventory
+      ansible.controller.host:
+        name: "localhost"
+        inventory: "{{ inventory_name }}"
+        variables:
+          ansible_connection: local
+          ansible_python_interpreter: "{{ '{{ ansible_playbook_python }}' }}"
+        state: present
+
+    # ── Controller: Project ───────────────────────────────────────────────────
+
+    - name: Create GitHub project
+      ansible.controller.project:
+        name: "{{ controller_project_name }}"
+        organization: "{{ aap_org_name }}"
+        scm_type: git
+        scm_url: "{{ github_repo }}"
+        scm_branch: "{{ github_branch }}"
+        scm_update_on_launch: true
+        description: "Red Hat Summit 2026 — NetBox circuit failover demo"
+        wait: true
+        state: present
+
+    # ── Controller: Job Template — Circuit Failover ───────────────────────────
+
+    - name: Create Circuit Failover job template
+      ansible.controller.job_template:
+        name: "{{ jt_failover_name }}"
+        organization: "{{ aap_org_name }}"
+        inventory: "{{ inventory_name }}"
+        project: "{{ controller_project_name }}"
+        playbook: "ansible/pb_circuit_failover.yml"
+        job_type: run
+        ask_variables_on_launch: true
+        extra_vars:
+          failed_circuit: "IPLC-GB-PH-PRI"
+        credentials:
+          - "{{ netbox_cred_name }}"
+        description: >-
+          Automated circuit failover driven by NetBox SoT.
+          Pass failed_circuit as extra var.
+        state: present
+
+    # ── Controller: Job Template — Deploy Report ──────────────────────────────
+
+    - name: Create Deploy Report job template
+      ansible.controller.job_template:
+        name: "{{ jt_report_name }}"
+        organization: "{{ aap_org_name }}"
+        inventory: "{{ inventory_name }}"
+        project: "{{ controller_project_name }}"
+        playbook: "ansible/pb_deploy_report.yml"
+        job_type: run
+        ask_variables_on_launch: true
+        extra_vars:
+          failed_circuit: "IPLC-GB-PH-PRI"
+        credentials:
+          - "{{ netbox_cred_name }}"
+        description: >-
+          Generates and deploys the HTML failover report
+          to the report web server.
+        state: present
+
+    # ── Controller: Job Template — Reset Demo ─────────────────────────────────
+
+    - name: Create Reset Demo job template
+      ansible.controller.job_template:
+        name: "{{ jt_reset_name }}"
+        organization: "{{ aap_org_name }}"
+        inventory: "{{ inventory_name }}"
+        project: "{{ controller_project_name }}"
+        playbook: "ansible/pb_reset_demo.yml"
+        job_type: run
+        credentials:
+          - "{{ netbox_cred_name }}"
+        description: >-
+          Resets all dd-tagged circuits back to active status
+          for demo re-runs.
+        state: present
+
+    # ── Controller: Workflow Template ─────────────────────────────────────────
+
+    - name: Create Circuit Failover Workflow
+      ansible.controller.workflow_job_template:
+        name: "{{ workflow_name }}"
+        organization: "{{ aap_org_name }}"
+        description: >-
+          Automated WAN circuit failover: updates NetBox
+          and deploys the incident report.
+        ask_variables_on_launch: true
+        extra_vars:
+          failed_circuit: "IPLC-GB-PH-PRI"
+        workflow_nodes:
+          - identifier: failover
+            unified_job_template:
+              name: "{{ jt_failover_name }}"
+              organization:
+                name: "{{ aap_org_name }}"
+              type: job_template
+            success_nodes:
+              - report
+          - identifier: report
+            unified_job_template:
+              name: "{{ jt_report_name }}"
+              organization:
+                name: "{{ aap_org_name }}"
+              type: job_template
+        destroy_current_nodes: true
+        state: present
+      register: workflow_result
+
+    # ── EDA: Decision Environment ─────────────────────────────────────────────
+
+    - name: Ensure decision environment exists
+      ansible.eda.decision_environment:
+        name: "{{ de_name }}"
+        image_url: "{{ de_image }}"
+        organization_name: "{{ aap_org_name }}"
+        description: >-
+          Decision environment for Summit NetBox
+          circuit failover demo
+        state: present
+
+    # ── EDA: Project ──────────────────────────────────────────────────────────
+
+    - name: Create EDA project
+      ansible.eda.project:
+        name: "{{ eda_project_name }}"
+        url: "{{ github_repo }}"
+        description: "Red Hat Summit 2026 — EDA rulebooks for circuit failover"
+        organization_name: "{{ aap_org_name }}"
+        sync: true
+        state: present
+
+    # ── EDA: AAP Controller Credential ────────────────────────────────────────
+
+    - name: Create AAP Controller credential for EDA
+      ansible.eda.credential:
+        name: "{{ eda_aap_cred_name }}"
+        organization_name: "{{ aap_org_name }}"
+        credential_type_name: "Red Hat Ansible Automation Platform"
+        inputs:
+          host: "{{ lookup('env', 'AAP_URL') }}"
+          username: "{{ lookup('env', 'AAP_USERNAME') }}"
+          password: "{{ lookup('env', 'AAP_PASSWORD') }}"
+          verify_ssl: false
+        description: "AAP controller credentials for EDA run_job_template"
+        state: present
+
+    # ── EDA: Token Event Stream Credential ────────────────────────────────────
+
+    - name: Create Token Event Stream credential
+      ansible.eda.credential:
+        name: "{{ eda_stream_cred_name }}"
+        organization_name: "{{ aap_org_name }}"
+        credential_type_name: "Token Event Stream"
+        inputs:
+          token: "{{ eda_stream_token }}"
+        description: "Shared token for NetBox → EDA webhook authentication"
+        state: present
+
+    # ── EDA: Event Stream ─────────────────────────────────────────────────────
+
+    - name: Create event stream
+      ansible.eda.event_stream:
+        name: "{{ eda_event_stream_name }}"
+        organization_name: "{{ aap_org_name }}"
+        credential_name: "{{ eda_stream_cred_name }}"
+        state: present
+
+    # ── EDA: Rulebook Activation ──────────────────────────────────────────────
+
+    - name: Create rulebook activation
+      ansible.eda.rulebook_activation:
+        name: "{{ eda_activation_name }}"
+        organization_name: "{{ aap_org_name }}"
+        project_name: "{{ eda_project_name }}"
+        rulebook_name: "rulebook.yml"
+        decision_environment_name: "{{ de_name }}"
+        event_streams:
+          - event_stream: "{{ eda_event_stream_name }}"
+            source_index: 0
+        eda_credentials:
+          - "{{ eda_aap_cred_name }}"
+        restart_policy: "on-failure"
+        description: >-
+          Listens for NetBox circuit events and triggers
+          AAP failover workflow
+        state: present
+
+    # ── NetBox: Webhook ───────────────────────────────────────────────────────
+
+    - name: Look up workflow template ID for webhook URL
+      ansible.builtin.uri:
+        url: >-
+          {{ lookup('env', 'AAP_URL') }}/api/controller/v2/workflow_job_templates/?name={{ workflow_name | urlencode }}
+        method: GET
+        user: "{{ lookup('env', 'AAP_USERNAME') }}"
+        password: "{{ lookup('env', 'AAP_PASSWORD') }}"
+        force_basic_auth: true
+        validate_certs: false
+      register: wf_lookup
+
+    - name: Set workflow launch URL
+      ansible.builtin.set_fact:
+        workflow_launch_url: >-
+          {{ lookup('env', 'AAP_URL') }}/api/controller/v2/workflow_job_templates/{{ wf_lookup.json.results[0].id }}/launch/
+
+    - name: Check if NetBox webhook exists
+      ansible.builtin.uri:
+        url: >-
+          {{ netbox_url }}/api/extras/webhooks/?name={{ netbox_webhook_name | urlencode }}
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+        validate_certs: "{{ netbox_validate_certs }}"
+      register: existing_webhooks
+
+    - name: Create NetBox webhook
+      ansible.builtin.uri:
+        url: "{{ netbox_url }}/api/extras/webhooks/"
+        method: POST
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          name: "{{ netbox_webhook_name }}"
+          payload_url: "{{ workflow_launch_url }}"
+          http_method: "POST"
+          http_content_type: "application/json"
+          additional_headers: "Authorization: Bearer {{ aap_token }}"
+          body_template: !unsafe '{"extra_vars": {"failed_circuit": "{{ data.cid }}"}}'
+          ssl_verification: false
+        validate_certs: "{{ netbox_validate_certs }}"
+        status_code:
+          - 201
+      register: webhook_created
+      when: existing_webhooks.json.count == 0
+
+    - name: Update NetBox webhook
+      ansible.builtin.uri:
+        url: "{{ netbox_url }}/api/extras/webhooks/{{ existing_webhooks.json.results[0].id }}/"
+        method: PATCH
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          payload_url: "{{ workflow_launch_url }}"
+          additional_headers: "Authorization: Bearer {{ aap_token }}"
+          body_template: !unsafe '{"extra_vars": {"failed_circuit": "{{ data.cid }}"}}'
+          ssl_verification: false
+        validate_certs: "{{ netbox_validate_certs }}"
+        status_code:
+          - 200
+      register: webhook_updated
+      when: existing_webhooks.json.count > 0
+
+    - name: Look up webhook ID for event rule
+      ansible.builtin.uri:
+        url: >-
+          {{ netbox_url }}/api/extras/webhooks/?name={{ netbox_webhook_name | urlencode }}
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+        validate_certs: "{{ netbox_validate_certs }}"
+      register: webhook_lookup
+
+    # ── NetBox: Event Rule ────────────────────────────────────────────────────
+
+    - name: Check if NetBox event rule exists
+      ansible.builtin.uri:
+        url: >-
+          {{ netbox_url }}/api/extras/event-rules/?name={{ netbox_webhook_name | urlencode }}
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+        validate_certs: "{{ netbox_validate_certs }}"
+      register: existing_event_rules
+
+    - name: Create NetBox event rule
+      ansible.builtin.uri:
+        url: "{{ netbox_url }}/api/extras/event-rules/"
+        method: POST
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          name: "{{ netbox_webhook_name }}"
+          enabled: true
+          object_types:
+            - "circuits.circuit"
+          event_types:
+            - "object_updated"
+          action_type: "webhook"
+          action_object_type: "extras.webhook"
+          action_object_id: "{{ webhook_lookup.json.results[0].id }}"
+        validate_certs: "{{ netbox_validate_certs }}"
+        status_code:
+          - 201
+      when: existing_event_rules.json.count == 0
+
+    - name: Update NetBox event rule
+      ansible.builtin.uri:
+        url: "{{ netbox_url }}/api/extras/event-rules/{{ existing_event_rules.json.results[0].id }}/"
+        method: PATCH
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          enabled: true
+          action_object_id: "{{ webhook_lookup.json.results[0].id }}"
+        validate_certs: "{{ netbox_validate_certs }}"
+        status_code:
+          - 200
+      when: existing_event_rules.json.count > 0
+
+    # ── Report server registration (conditional) ──────────────────────────────
+
+    - name: Register report server with AAP
+      when: report_server_ip is defined
+      block:
+        - name: Read SSH private key
+          ansible.builtin.slurp:
+            src: "{{ private_key_path }}"
+          register: ssh_key_data
+
+        - name: Create Machine credential for report server
+          ansible.controller.credential:
+            name: "{{ report_server_cred_name }}"
+            organization: "{{ aap_org_name }}"
+            credential_type: "Machine"
+            inputs:
+              username: "ec2-user"
+              ssh_key_data: "{{ ssh_key_data.content | b64decode }}"
+            description: >-
+              SSH key for the Summit demo report web server (EC2)
+            state: present
+
+        - name: Add report server host to inventory
+          ansible.controller.host:
+            name: "{{ report_server_ip }}"
+            inventory: "{{ inventory_name }}"
+            variables:
+              ansible_port: "{{ report_server_port | default(2222) }}"
+              ansible_user: "ec2-user"
+            state: present
+
+        - name: Attach Machine credential to Deploy Report template
+          ansible.controller.job_template:
+            name: "{{ jt_report_name }}"
+            organization: "{{ aap_org_name }}"
+            credentials:
+              - "{{ netbox_cred_name }}"
+              - "{{ report_server_cred_name }}"
+            state: present
+
+        - name: Attach Machine credential to Circuit Failover template
+          ansible.controller.job_template:
+            name: "{{ jt_failover_name }}"
+            organization: "{{ aap_org_name }}"
+            credentials:
+              - "{{ netbox_cred_name }}"
+              - "{{ report_server_cred_name }}"
+            state: present
+
+    # ── Summary ───────────────────────────────────────────────────────────────
+
+    - name: Setup complete
+      ansible.builtin.debug:
+        msg: |
+          AAP + NetBox setup complete.
+
+            Controller Resources:
+              Organization:     {{ aap_org_name }}
+              NetBox Cred:      {{ netbox_cred_name }}
+              Inventory:        {{ inventory_name }}
+              Project:          {{ controller_project_name }}
+              JT Failover:      {{ jt_failover_name }}
+              JT Report:        {{ jt_report_name }}
+              JT Reset:         {{ jt_reset_name }}
+              Workflow:         {{ workflow_name }}
+
+            EDA Resources:
+              Decision Env:     {{ de_name }}
+              Project:          {{ eda_project_name }}
+              AAP Credential:   {{ eda_aap_cred_name }}
+              Stream Cred:      {{ eda_stream_cred_name }}
+              Event Stream:     {{ eda_event_stream_name }}
+              Activation:       {{ eda_activation_name }}
+
+            NetBox:
+              Webhook:          {{ netbox_webhook_name }} → {{ workflow_launch_url }}
+              Event Rule:       {{ netbox_webhook_name }} (circuits.circuit → object_updated)
+              {{ 'Report Server:   ' ~ report_server_ip ~ ':' ~ (report_server_port | default(2222)) if report_server_ip is defined else '' }}
+        verbosity: 0
