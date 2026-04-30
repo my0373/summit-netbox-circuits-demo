@@ -128,7 +128,7 @@
       <div class="cid">{{ primary.cid }}</div>
       <div class="field"><span class="key">Provider</span><span class="val">{{ primary.provider.name }}</span></div>
       <div class="field"><span class="key">Type</span><span class="val">{{ primary.type.name }}</span></div>
-      <div class="field"><span class="key">Status</span><span class="val"><span class="badge offline">{{ primary.status.label }}</span></span></div>
+      <div class="field"><span class="key">Status</span><span class="val"><span class="badge offline">{% if primary.status.value == 'deprovisioning' %}Offline{% else %}{{ primary.status.label }}{% endif %}</span></span></div>
       <div class="field"><span class="key">Committed Rate</span><span class="val">{{ primary.commit_rate // 1000 }} Mbps</span></div>
       <div class="field"><span class="key">A-side</span><span class="val">{{ primary_a_site }}</span></div>
       <div class="field"><span class="key">Z-side</span><span class="val">{{ primary_z_site }}</span></div>
@@ -232,7 +232,7 @@
 
     <div class="step detect">
       <h3>Circuit failure detected <span class="ts">T+0.0s</span></h3>
-      <p><strong>{{ primary.cid }}</strong> status changed to {{ primary.status.label }} in NetBox.
+      <p><strong>{{ primary.cid }}</strong> status changed to {% if primary.status.value == 'deprovisioning' %}Offline{% else %}{{ primary.status.label }}{% endif %} in NetBox.
          Event-Driven Ansible detected the circuit update via the NetBox event rule
          and triggered the <strong>Circuit Failover Workflow</strong> in
          Ansible Automation Platform.</p>
@@ -277,7 +277,7 @@
       <h3>NetBox Source of Truth updated <span class="ts">T+21.6s</span></h3>
       <p>
         Ansible Automation Platform wrote back to NetBox via the <code>netbox.netbox.netbox_circuit</code> module:
-        <strong>{{ primary.cid }}</strong> &rarr; {{ primary.status.label }},
+        <strong>{{ primary.cid }}</strong> &rarr; {% if primary.status.value == 'deprovisioning' %}Offline{% else %}{{ primary.status.label }}{% endif %},
         <strong>{{ backup.cid }}</strong> &rarr; Active.
         Visual Explorer WAN map updated in real-time. Workflow Step 1 complete.
       </p>
