@@ -42,10 +42,22 @@ output "mcp_claude_add_command" {
   EOT
 }
 
+# ── Cisco Router ───────────────────────────────────────────────────────────────
+
+output "router_ip" {
+  description = "Public IP of the Cisco demo router"
+  value       = aws_eip.cisco_router.public_ip
+}
+
+output "router_ssh" {
+  description = "SSH command for the Cisco router (local IOS user — no key pair)"
+  value       = "ssh iosuser@${aws_eip.cisco_router.public_ip}  # password: iospass"
+}
+
 # ── Shared ─────────────────────────────────────────────────────────────────────
 
 output "ssh_port" {
-  description = "SSH port used on all VMs"
+  description = "SSH port used on all Linux VMs (router uses standard port 22)"
   value       = var.ssh_port
 }
 
