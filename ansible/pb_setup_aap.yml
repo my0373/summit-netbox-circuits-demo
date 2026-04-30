@@ -62,6 +62,11 @@
     jt_reset_name: "{{ aap_org_name }} Reset Demo"
     workflow_name: "{{ aap_org_name }} Circuit Failover Workflow"
     report_server_cred_name: "{{ aap_org_name }} Report Server SSH"
+    # Execution Environment
+    ee_name: "{{ aap_org_name }} Execution Environment"
+    ee_image: "quay.io/acme_corp/netbox-summit-2026-ee:v3.22"
+    registry_cred_name: "{{ aap_org_name }} Container Registry"
+    galaxy_cred_name: "{{ aap_org_name }} Automation Hub"
     # EDA resource names
     de_name: "{{ aap_org_name }} Decision Environment"
     eda_project_name: "{{ aap_org_name }} EDA Project"
@@ -99,6 +104,8 @@
           Missing required environment variables. Source your .env file first.
           Required: AAP_URL, AAP_USERNAME, AAP_PASSWORD, NETBOX_URL,
           NETBOX_TOKEN, EDA_STREAM_TOKEN
+      tags:
+        - always
 
     # ── Controller: NetBox credential type ──────────────────────────────────
 
@@ -125,6 +132,8 @@
             NETBOX_URL: "{{ '{{' }} NETBOX_API {{ '}}' }}"
             NETBOX_TOKEN: "{{ '{{' }} NETBOX_TOKEN {{ '}}' }}"
         state: present
+      tags:
+        - credentials
 
     # ── Controller: NetBox credential ─────────────────────────────────────────
 
@@ -137,6 +146,37 @@
           NETBOX_API: "{{ netbox_url }}"
           NETBOX_TOKEN: "{{ netbox_token }}"
         state: present
+      tags:
+        - credentials
+
+    # ── Controller: Container Registry credential ──────────────────────────────
+
+    - name: Create container registry credential
+      ansible.controller.credential:
+        name: "{{ registry_cred_name }}"
+        organization: "{{ aap_org_name }}"
+        credential_type: "Container Registry"
+        inputs:
+          host: "{{ lookup('env', 'REGISTRY_HOST') | default('quay.io', true) }}"
+          username: "{{ lookup('env', 'REGISTRY_USERNAME') | default(omit, true) }}"
+          password: "{{ lookup('env', 'REGISTRY_PASSWORD') | default(omit, true) }}"
+        state: present
+      tags:
+        - credentials
+
+    # ── Controller: Automation Hub credential ────────────────────────────────
+
+    - name: Create Automation Hub credential
+      ansible.controller.credential:
+        name: "{{ galaxy_cred_name }}"
+        organization: "{{ aap_org_name }}"
+        credential_type: "Ansible Galaxy/Automation Hub API Token"
+        inputs:
+          url: "{{ lookup('env', 'AH_URL') | default('https://console.redhat.com/api/automation-hub/', true) }}"
+          token: "{{ lookup('env', 'AH_TOKEN') | default(omit, true) }}"
+        state: present
+      tags:
+        - credentials
 
     # ── Controller: Inventory ─────────────────────────────────────────────────
 
@@ -146,6 +186,8 @@
         organization: "{{ aap_org_name }}"
         description: "Localhost inventory for Summit demo playbooks"
         state: present
+      tags:
+        - inventory
 
     # ── Controller: Localhost host ────────────────────────────────────────────
 
@@ -157,6 +199,8 @@
           ansible_connection: local
           ansible_python_interpreter: "{{ '{{ ansible_playbook_python }}' }}"
         state: present
+      tags:
+        - inventory
 
     # ── Controller: Project ───────────────────────────────────────────────────
 
@@ -168,9 +212,25 @@
         scm_url: "{{ github_repo }}"
         scm_branch: "{{ github_branch }}"
         scm_update_on_launch: true
+        credential: "{{ galaxy_cred_name }}"
         description: "Red Hat Summit 2026 — NetBox circuit failover demo"
         wait: true
         state: present
+      tags:
+        - project
+
+    # ── Controller: Execution Environment ──────────────────────────────────
+
+    - name: Create execution environment
+      ansible.controller.execution_environment:
+        name: "{{ ee_name }}"
+        image: "{{ ee_image }}"
+        organization: "{{ aap_org_name }}"
+        credential: "{{ registry_cred_name }}"
+        pull: missing
+        state: present
+      tags:
+        - ee
 
     # ── Controller: Job Template — Circuit Failover ───────────────────────────
 
@@ -181,6 +241,7 @@
         inventory: "{{ inventory_name }}"
         project: "{{ controller_project_name }}"
         playbook: "ansible/pb_circuit_failover.yml"
+        execution_environment: "{{ ee_name }}"
         job_type: run
         ask_variables_on_launch: true
         extra_vars:
@@ -191,6 +252,8 @@
           Automated circuit failover driven by NetBox SoT.
           Pass failed_circuit as extra var.
         state: present
+      tags:
+        - job_templates
 
     # ── Controller: Job Template — Deploy Report ──────────────────────────────
 
@@ -201,6 +264,7 @@
         inventory: "{{ inventory_name }}"
         project: "{{ controller_project_name }}"
         playbook: "ansible/pb_deploy_report.yml"
+        execution_environment: "{{ ee_name }}"
         job_type: run
         ask_variables_on_launch: true
         extra_vars:
@@ -211,6 +275,8 @@
           Generates and deploys the HTML failover report
           to the report web server.
         state: present
+      tags:
+        - job_templates
 
     # ── Controller: Job Template — Reset Demo ─────────────────────────────────
 
@@ -221,6 +287,7 @@
         inventory: "{{ inventory_name }}"
         project: "{{ controller_project_name }}"
         playbook: "ansible/pb_reset_demo.yml"
+        execution_environment: "{{ ee_name }}"
         job_type: run
         credentials:
           - "{{ netbox_cred_name }}"
@@ -228,6 +295,8 @@
           Resets all dd-tagged circuits back to active status
           for demo re-runs.
         state: present
+      tags:
+        - job_templates
 
     # ── Controller: Workflow Template ─────────────────────────────────────────
 
@@ -259,6 +328,8 @@
         destroy_current_nodes: true
         state: present
       register: workflow_result
+      tags:
+        - workflow
 
     # ── EDA: Decision Environment ─────────────────────────────────────────────
 
@@ -271,6 +342,8 @@
           Decision environment for Summit NetBox
           circuit failover demo
         state: present
+      tags:
+        - eda
 
     # ── EDA: Project ──────────────────────────────────────────────────────────
 
@@ -282,6 +355,8 @@
         organization_name: "{{ aap_org_name }}"
         sync: true
         state: present
+      tags:
+        - eda
 
     # ── EDA: AAP Controller Credential ────────────────────────────────────────
 
@@ -297,6 +372,8 @@
           verify_ssl: false
         description: "AAP controller credentials for EDA run_job_template"
         state: present
+      tags:
+        - eda
 
     # ── EDA: Token Event Stream Credential ────────────────────────────────────
 
@@ -309,6 +386,8 @@
           token: "{{ eda_stream_token }}"
         description: "Shared token for NetBox → EDA webhook authentication"
         state: present
+      tags:
+        - eda
 
     # ── EDA: Event Stream ─────────────────────────────────────────────────────
 
@@ -318,6 +397,8 @@
         organization_name: "{{ aap_org_name }}"
         credential_name: "{{ eda_stream_cred_name }}"
         state: present
+      tags:
+        - eda
 
     # ── EDA: Rulebook Activation ──────────────────────────────────────────────
 
@@ -338,6 +419,8 @@
           Listens for NetBox circuit events and triggers
           AAP failover workflow
         state: present
+      tags:
+        - eda
 
     # ── NetBox: Webhook ───────────────────────────────────────────────────────
 
@@ -351,11 +434,15 @@
         force_basic_auth: true
         validate_certs: false
       register: wf_lookup
+      tags:
+        - netbox
 
     - name: Set workflow launch URL
       ansible.builtin.set_fact:
         workflow_launch_url: >-
           {{ lookup('env', 'AAP_URL') }}/api/controller/v2/workflow_job_templates/{{ wf_lookup.json.results[0].id }}/launch/
+      tags:
+        - netbox
 
     - name: Check if NetBox webhook exists
       ansible.builtin.uri:
@@ -365,6 +452,8 @@
           Authorization: "Token {{ netbox_token }}"
         validate_certs: "{{ netbox_validate_certs }}"
       register: existing_webhooks
+      tags:
+        - netbox
 
     - name: Create NetBox webhook
       ansible.builtin.uri:
@@ -387,6 +476,8 @@
           - 201
       register: webhook_created
       when: existing_webhooks.json.count == 0
+      tags:
+        - netbox
 
     - name: Update NetBox webhook
       ansible.builtin.uri:
@@ -406,6 +497,8 @@
           - 200
       register: webhook_updated
       when: existing_webhooks.json.count > 0
+      tags:
+        - netbox
 
     - name: Look up webhook ID for event rule
       ansible.builtin.uri:
@@ -415,6 +508,8 @@
           Authorization: "Token {{ netbox_token }}"
         validate_certs: "{{ netbox_validate_certs }}"
       register: webhook_lookup
+      tags:
+        - netbox
 
     # ── NetBox: Event Rule ────────────────────────────────────────────────────
 
@@ -426,6 +521,8 @@
           Authorization: "Token {{ netbox_token }}"
         validate_certs: "{{ netbox_validate_certs }}"
       register: existing_event_rules
+      tags:
+        - netbox
 
     - name: Create NetBox event rule
       ansible.builtin.uri:
@@ -449,6 +546,8 @@
         status_code:
           - 201
       when: existing_event_rules.json.count == 0
+      tags:
+        - netbox
 
     - name: Update NetBox event rule
       ansible.builtin.uri:
@@ -465,11 +564,15 @@
         status_code:
           - 200
       when: existing_event_rules.json.count > 0
+      tags:
+        - netbox
 
     # ── Report server registration (conditional) ──────────────────────────────
 
     - name: Register report server with AAP
       when: report_server_ip is defined
+      tags:
+        - report_server
       block:
         - name: Read SSH private key
           ansible.builtin.slurp:
@@ -501,6 +604,7 @@
           ansible.controller.job_template:
             name: "{{ jt_report_name }}"
             organization: "{{ aap_org_name }}"
+            execution_environment: "{{ ee_name }}"
             credentials:
               - "{{ netbox_cred_name }}"
               - "{{ report_server_cred_name }}"
@@ -510,6 +614,7 @@
           ansible.controller.job_template:
             name: "{{ jt_failover_name }}"
             organization: "{{ aap_org_name }}"
+            execution_environment: "{{ ee_name }}"
             credentials:
               - "{{ netbox_cred_name }}"
               - "{{ report_server_cred_name }}"
@@ -518,6 +623,8 @@
     # ── Summary ───────────────────────────────────────────────────────────────
 
     - name: Setup complete
+      tags:
+        - always
       ansible.builtin.debug:
         msg: |
           AAP + NetBox setup complete.
