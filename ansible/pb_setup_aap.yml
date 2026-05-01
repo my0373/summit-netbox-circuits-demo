@@ -75,6 +75,8 @@
     eda_stream_cred_name: "{{ aap_org_name }} EDA Webhook Token"
     eda_event_stream_name: "{{ aap_org_name }} EDA Circuit Events"
     eda_activation_name: "{{ aap_org_name }} EDA Circuit Failover"
+    # Report
+    report_filename: "failover_report.html"
     # NetBox resource names
     netbox_webhook_name: "{{ aap_org_name }} AAP Circuit Failover"
 
@@ -599,6 +601,16 @@
             variables:
               ansible_port: "{{ report_server_port | default(2222) }}"
               ansible_user: "ec2-user"
+              report_filename: "{{ report_filename }}"
+              report_url: "https://{{ report_server_ip }}/{{ report_filename }}"
+            state: present
+
+        - name: Create report_servers group and add host
+          ansible.controller.group:
+            name: "report_servers"
+            inventory: "{{ inventory_name }}"
+            hosts:
+              - "{{ report_server_ip }}"
             state: present
 
         - name: Attach Machine credential to Deploy Report template
