@@ -45,7 +45,7 @@ def make_panel(ax, title, show_primary_active, show_backup_active):
                 fontsize=7.5, color=GREY)
 
     site_box(1.5, 3.5, "gb-brs-rtr-01", "GB-Bristol")
-    site_box(8.5, 3.5, "US-Atlanta", "us-atl-rtr-01")
+    site_box(8.5, 3.5, "US-Atlanta", "Site termination")
 
     # ── Routing table box ─────────────────────────────────────────────────────
     rt_box = FancyBboxPatch((0.2, 0.3), 3.6, 1.6,
