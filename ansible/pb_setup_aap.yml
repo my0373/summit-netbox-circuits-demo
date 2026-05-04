@@ -433,6 +433,7 @@
         name: "{{ eda_event_stream_name }}"
         organization_name: "{{ aap_org_name }}"
         credential_name: "{{ eda_stream_cred_name }}"
+        forward_events: true
         state: present
       tags:
         - eda
@@ -461,23 +462,22 @@
 
     # ── NetBox: Webhook ───────────────────────────────────────────────────────
 
-    - name: Look up workflow template ID for webhook URL
+    - name: Look up EDA event stream URL
       ansible.builtin.uri:
         url: >-
-          {{ controller_api_base }}/v2/workflow_job_templates/?name={{ workflow_name | urlencode }}
+          {{ lookup('env', 'AAP_URL') }}/api/eda/v1/event-streams/?name={{ eda_event_stream_name | urlencode }}
         method: GET
         user: "{{ lookup('env', 'AAP_USERNAME') }}"
         password: "{{ lookup('env', 'AAP_PASSWORD') }}"
         force_basic_auth: true
         validate_certs: false
-      register: wf_lookup
+      register: eda_stream_lookup
       tags:
         - netbox
 
-    - name: Set workflow launch URL
+    - name: Set EDA event stream URL
       ansible.builtin.set_fact:
-        workflow_launch_url: >-
-          {{ controller_api_base }}/v2/workflow_job_templates/{{ wf_lookup.json.results[0].id }}/launch/
+        eda_event_stream_url: "{{ eda_stream_lookup.json.results[0].url }}"
       tags:
         - netbox
 
@@ -502,11 +502,10 @@
         body_format: json
         body:
           name: "{{ netbox_webhook_name }}"
-          payload_url: "{{ workflow_launch_url }}"
+          payload_url: "{{ eda_event_stream_url }}"
           http_method: "POST"
           http_content_type: "application/json"
-          additional_headers: "Authorization: Bearer {{ aap_token }}"
-          body_template: !unsafe '{"extra_vars": {"failed_circuit": "{{ data.cid }}"}}'
+          additional_headers: "Authorization: Bearer {{ eda_stream_token }}"
           ssl_verification: false
         validate_certs: "{{ netbox_validate_certs }}"
         status_code:
@@ -525,9 +524,9 @@
           Content-Type: "application/json"
         body_format: json
         body:
-          payload_url: "{{ workflow_launch_url }}"
-          additional_headers: "Authorization: Bearer {{ aap_token }}"
-          body_template: !unsafe '{"extra_vars": {"failed_circuit": "{{ data.cid }}"}}'
+          payload_url: "{{ eda_event_stream_url }}"
+          additional_headers: "Authorization: Bearer {{ eda_stream_token }}"
+          body_template: ""
           ssl_verification: false
         validate_certs: "{{ netbox_validate_certs }}"
         status_code:
@@ -787,7 +786,7 @@
               Activation:       {{ eda_activation_name }}
 
             NetBox:
-              Webhook:          {{ netbox_webhook_name }} → {{ workflow_launch_url | default('(run with netbox tag)') }}
+              Webhook:          {{ netbox_webhook_name }} → {{ eda_event_stream_url | default('(run with netbox tag)') }}
               Event Rule:       {{ netbox_webhook_name }} (circuits.circuit → object_updated)
               {{ 'Report Server:   ' ~ report_server_host ~ ':' ~ report_server_port if report_server_host | length > 0 else '' }}
               {{ 'Router Cred:     ' ~ router_cred_name ~ ' (' ~ router_ip ~ ')' if router_ip | length > 0 else '' }}
