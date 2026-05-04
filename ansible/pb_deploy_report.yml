@@ -24,7 +24,7 @@
 
   vars:
     failed_circuit: "IPLC-GB-AT-PRI"
-    report_filename: "failover_report.html"
+    report_filename: "failover_report_collection.html"
     report_dir: "{{ playbook_dir }}/reports"
 
   tasks:
@@ -187,7 +187,7 @@
     report_server_host: "{{ lookup('env', 'REPORT_SERVER_HOST') }}"
     report_server_port: "{{ lookup('env', 'REPORT_SERVER_PORT') | default('2222', true) }}"
     report_url: "{{ lookup('env', 'REPORT_URL') }}"
-    report_filename: "failover_report.html"
+    report_filename: "failover_report_collection.html"
 
   tasks:
     - name: Skip if no report server configured

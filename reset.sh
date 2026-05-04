@@ -18,7 +18,7 @@ export ANSIBLE_NET_USERNAME="${ROUTER_USERNAME:-iosuser}"
 export ANSIBLE_NET_PASSWORD="${ROUTER_PASSWORD:-}"
 
 
-REPORT_URL="${REPORT_URL:-https://<report_server_host>/failover_report.html}"
+REPORT_URL="${REPORT_URL:-https://<report_server_host>/failover_report_collection.html}"
 
 echo "Resetting demo circuits to active..."
 ansible-playbook ansible/pb_reset_demo.yml \
