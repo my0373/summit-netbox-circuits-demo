@@ -13,11 +13,7 @@ set -a
 source .env
 set +a
 
-REPORT_URL=""
-if [ -f ansible/vars/infra.yml ]; then
-  REPORT_URL=$(grep 'report_url:' ansible/vars/infra.yml | awk '{print $2}' | tr -d '"')
-fi
-REPORT_URL="${REPORT_URL:-https://<report_server_ip>/failover_report.html}"
+REPORT_URL="${REPORT_URL:-https://<report_server_host>/failover_report.html}"
 
 echo "Resetting demo circuits to active..."
 ansible-playbook ansible/pb_reset_demo.yml \

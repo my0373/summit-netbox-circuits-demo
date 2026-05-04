@@ -15,15 +15,22 @@
 
 Copy `.env.example` to `.env` and fill in:
 
-| Variable | Description |
-|---|---|
-| `NETBOX_URL` | NetBox instance URL |
-| `NETBOX_TOKEN` | NetBox API token (v1 format required — see note below) |
-| `AAP_URL` | Ansible Automation Platform base URL |
-| `AAP_USERNAME` | AAP username |
-| `AAP_PASSWORD` | AAP password |
-| `AAP_TOKEN` | AAP OAuth token — used by the NetBox webhook to launch the workflow |
-| `EDA_STREAM_TOKEN` | Shared token for NetBox → EDA webhook authentication (any strong random string) |
+| Variable | Required | Description |
+|---|---|---|
+| `NETBOX_URL` | Yes | NetBox instance URL |
+| `NETBOX_TOKEN` | Yes | NetBox API token (v1 format required — see note below) |
+| `AAP_URL` | Yes | Ansible Automation Platform base URL |
+| `AAP_USERNAME` | Yes | AAP username |
+| `AAP_PASSWORD` | Yes | AAP password |
+| `AAP_TOKEN` | Yes | AAP OAuth token — used by the NetBox webhook to launch the workflow |
+| `EDA_STREAM_TOKEN` | Yes | Shared token for NetBox → EDA webhook authentication (any strong random string) |
+| `REPORT_SERVER_HOST` | No | IP or hostname of the report web server |
+| `REPORT_SERVER_PORT` | No | SSH port for report server (default: `2222`) |
+| `REPORT_URL` | No | Public URL where the report is served |
+| `ROUTER_IP` | No | Management IP of the Cisco router |
+| `ROUTER_PASSWORD` | No | Password for the router Network credential |
+| `ROUTER_USERNAME` | No | Router username (default: `iosuser`) |
+| `PRIVATE_KEY_PATH` | No | Path to SSH private key for infrastructure VMs |
 
 `.env` is gitignored and will never be committed.
 
@@ -82,26 +89,48 @@ The EDA rulebook activation receives webhooks from NetBox via the event stream, 
 ## First-Time Setup
 
 ```bash
-# 1. Initial setup — creates .env and ansible/vars/infra.yml placeholders
+# 1. Initial setup — creates .env from .env.example
 ./setup.sh
 # Fill in .env with your NetBox, AAP, and EDA credentials
 
 # 2. Install required Ansible collections
 ansible-galaxy collection install -r collections/requirements.yml
+```
 
-# 3. Configure AAP, EDA, and NetBox resources (idempotent — safe to re-run)
-source .env
-./run-playbook.sh ansible/pb_setup_aap.yml
+All AAP, EDA, and NetBox resources are created by `pb_setup_aap.yml` using the `ansible.controller`, `ansible.eda`, and `netbox.netbox` collections. No Python dependencies required.
 
-# 4. Provision AWS infrastructure (report server + MCP server)
-# This also re-runs pb_setup_aap.yml with report server registration
+### Option A: With Terraform (full demo with AWS infrastructure)
+
+Provisions EC2 instances for the report server and Cisco router, then configures AAP with all resources including infrastructure hosts.
+
+```bash
+# 3. Provision AWS infrastructure — populates .env with infra variables
 ./setup_infra.sh
+
+# 4. Reset circuits to starting state
+./reset.sh
+```
+
+`setup_infra.sh` runs Terraform, writes the resulting IPs and credentials to `.env`, and re-runs `pb_setup_aap.yml` to register the infrastructure in AAP.
+
+### Option B: Without Terraform (AAP + NetBox only)
+
+The core demo works without AWS infrastructure. Report publishing and router configuration are skipped gracefully when their variables are empty in `.env`.
+
+```bash
+# 3. (Optional) Fill in infrastructure variables in .env
+#    Leave REPORT_SERVER_HOST, ROUTER_IP, etc. empty to skip those features
+
+# 4. Configure AAP, EDA, and NetBox resources
+./run-playbook.sh ansible/pb_setup_aap.yml
 
 # 5. Reset circuits to starting state
 ./reset.sh
 ```
 
-All AAP, EDA, and NetBox resources are created by `pb_setup_aap.yml` using the `ansible.controller`, `ansible.eda`, and `netbox.netbox` collections. No Python dependencies required.
+When an infrastructure variable is empty:
+- **No `REPORT_SERVER_HOST`** — report is generated locally but not published to a web server
+- **No `ROUTER_IP`** — router credential and NetBox device IP registration are skipped
 
 ---
 

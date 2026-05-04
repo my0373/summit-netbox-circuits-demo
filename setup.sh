@@ -9,27 +9,22 @@ else
     echo ".env created — fill in your credentials before running the demo."
 fi
 
-# Create infra.yml placeholder if not present
-if [ ! -f ansible/vars/infra.yml ]; then
-    cp ansible/vars/infra.yml.example ansible/vars/infra.yml
-    echo "ansible/vars/infra.yml created (empty — run ./setup_infra.sh to populate)."
-fi
-
 echo ""
 cat << 'NEXTSTEPS'
 ========================================================
   Setup complete — what to do next:
 ========================================================
 
-  1. Fill in .env with your credentials (if not done):
+  1. Fill in .env with your credentials:
        NETBOX_URL, NETBOX_TOKEN, AAP_URL, AAP_USERNAME,
        AAP_PASSWORD, EDA_STREAM_TOKEN
 
   2. Configure AAP and EDA (idempotent — safe to re-run):
        ./run-playbook.sh ansible/pb_setup_aap.yml
 
-  3. Provision AWS infrastructure (report server + MCP VM):
+  3. (Optional) Provision AWS infrastructure:
        ./setup_infra.sh
+     Or fill in REPORT_SERVER_HOST, ROUTER_IP, etc. in .env manually.
 
   4. Reset NetBox circuits to starting state:
        ./reset.sh

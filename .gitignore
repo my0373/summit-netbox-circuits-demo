@@ -20,11 +20,6 @@ infra/terraform.tfstate.backup
 infra/terraform.tfvars
 infra/keys/
 
-# Generated infra vars (written by setup_infra.sh) — commit infra.yml.example not infra.yml
-ansible/vars/infra.yml
-!ansible/vars/infra.yml.example
-ansible/vars/network_creds.yml
-
 # Slides — rendered PNGs are generated from .mmd source, no need to commit
 slides/*.png
 
