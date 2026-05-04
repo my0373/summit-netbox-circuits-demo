@@ -680,6 +680,40 @@
                 address: "{{ router_ip }}/32"
             state: present
 
+        - name: Attach Network credential to Circuit Failover template
+          ansible.controller.job_template:
+            name: "{{ jt_failover_name }}"
+            organization: "{{ aap_org_name }}"
+            execution_environment: "{{ ee_name }}"
+            credentials:
+              - "{{ netbox_cred_name }}"
+              - "{{ report_server_cred_name }}"
+              - "{{ router_cred_name }}"
+            state: present
+          when: report_server_host | length > 0
+
+        - name: Attach Network credential to Circuit Failover template (no report server)
+          ansible.controller.job_template:
+            name: "{{ jt_failover_name }}"
+            organization: "{{ aap_org_name }}"
+            execution_environment: "{{ ee_name }}"
+            credentials:
+              - "{{ netbox_cred_name }}"
+              - "{{ router_cred_name }}"
+            state: present
+          when: report_server_host | length == 0
+
+        - name: Attach Network credential to Reset Demo template
+          ansible.controller.job_template:
+            name: "{{ jt_reset_name }}"
+            organization: "{{ aap_org_name }}"
+            execution_environment: "{{ ee_name }}"
+            credentials:
+              - "{{ netbox_cred_name }}"
+              - "{{ router_cred_name }}"
+            state: present
+
+
     # ── Summary ───────────────────────────────────────────────────────────────
 
     - name: Setup complete

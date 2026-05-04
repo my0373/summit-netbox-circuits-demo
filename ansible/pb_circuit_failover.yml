@@ -10,7 +10,7 @@
 #   1. Queries the failed circuit from NetBox
 #   2. Discovers the A/Z sites from circuit terminations
 #   3. Finds the best available backup circuit between the same sites
-#   4. Simulates router configuration updates (stub — no real device access)
+#   4. Pushes router config (real cisco.ios if router has IP, simulated otherwise)
 #   5. Updates NetBox: marks primary offline, backup active
 #
 # Report generation and deployment is handled by pb_deploy_report.yml,
@@ -211,47 +211,53 @@
       ansible.builtin.set_fact:
         all_routers: "{{ a_side_routers + z_side_routers }}"
 
-    # ── Simulated router operations ───────────────────────────────────────────
-    # In a real deployment these tasks would use ios_config / napalm / etc.
-    # For the demo the routers are simulated — we log what would happen.
+    # ── Router operations ───────────────────────────────────────────────────────
+    # Routers with a primary_ip4 in NetBox get real cisco.ios config push (Play 2).
+    # Routers without an IP are simulated with debug stubs below.
 
-    - name: "[SIMULATED] Check primary router interface status"
+    - name: Add routers with real IPs to dynamic inventory
+      ansible.builtin.add_host:
+        name: "{{ item.name }}"
+        groups: failover_routers
+        ansible_host: "{{ item.primary_ip4.address | ansible.utils.ipaddr('address') }}"
+        ansible_user: "{{ lookup('env', 'ROUTER_USERNAME') | default('iosuser', true) }}"
+        ansible_password: "{{ lookup('env', 'ROUTER_PASSWORD') | default(omit, true) }}"
+        ansible_network_os: cisco.ios.ios
+        ansible_connection: ansible.netcommon.network_cli
+        ansible_network_cli_ssh_type: paramiko
+      loop: >-
+        {{
+          all_routers
+          | selectattr('primary_ip4', 'defined')
+          | selectattr('primary_ip4', 'ne', none)
+          | list
+        }}
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: "[SIMULATED] Push failover config (no real router IP)"
       ansible.builtin.debug:
         msg: |
-          Connecting to {{ a_side_routers[0].name }} ...
-          GigabitEthernet0/0/0: protocol down, line protocol down
-          Confirmed: primary WAN interface is down.
+          [SIMULATED] {{ item.name }}:
+            no ip route 0.0.0.0 0.0.0.0 {{ router_primary_gw }}
+            ip route 0.0.0.0 0.0.0.0 {{ router_backup_gw }}
         verbosity: 0
-
-    - name: "[SIMULATED] Verify backup interface is up"
-      ansible.builtin.debug:
-        msg: |
-          Connecting to {{ a_side_routers[0].name }} ...
-          GigabitEthernet0/0/2: protocol up, line protocol up
-          Backup WAN interface is available.
-        verbosity: 0
-
-    - name: "[SIMULATED] Push failover config to A-side router"
-      ansible.builtin.debug:
-        msg: |
-          Pushing config to {{ a_side_routers[0].name }} ({{ a_side_site.display }}):
-            conf t
-            no ip route 0.0.0.0 0.0.0.0 172.16.0.1
-            ip route 0.0.0.0 0.0.0.0 {{ backup.custom_fields.get('backup_gateway', '172.16.1.1') }}
-            end
-          Config applied successfully.
-        verbosity: 0
-
-    - name: "[SIMULATED] Push failover config to Z-side router"
-      ansible.builtin.debug:
-        msg: |
-          Pushing config to {{ z_side_routers[0].name }} ({{ z_side_site.display }}):
-            conf t
-            no ip route 0.0.0.0 0.0.0.0 172.16.0.2
-            ip route 0.0.0.0 0.0.0.0 {{ backup.custom_fields.get('backup_gateway', '172.16.1.2') }}
-            end
-          Config applied successfully.
-        verbosity: 0
+      vars:
+        router_primary_gw: "{{ lookup('env', 'ROUTER_PRIMARY_GW') | default('172.16.0.1', true) }}"
+        router_backup_gw: "{{ lookup('env', 'ROUTER_BACKUP_GW') | default('172.16.1.1', true) }}"
+      loop: >-
+        {{
+          all_routers
+          | rejectattr('primary_ip4', 'defined')
+          | list
+          +
+          all_routers
+          | selectattr('primary_ip4', 'defined')
+          | selectattr('primary_ip4', 'eq', none)
+          | list
+        }}
+      loop_control:
+        label: "{{ item.name }}"
 
     # ── Update NetBox ─────────────────────────────────────────────────────────
     # These are real writes — this is what updates the Visual Explorer map.
@@ -321,3 +327,43 @@
             Routers:  config pushed to {{ all_routers | map(attribute='name') | join(', ') }}
           Report will be generated and deployed by the next workflow step.
         verbosity: 0
+
+# ── Play 2: Push failover routing to real routers ─────────────────────────────
+# Only runs when routers with real IPs were added to failover_routers in Play 1.
+# Non-fatal: SSH/config failures are caught so the workflow continues to Deploy Report.
+
+- name: "Push failover routing to routers — {{ failed_circuit | default('unknown') }}"
+  hosts: failover_routers
+  gather_facts: false
+  ignore_unreachable: true
+
+  vars:
+    failed_circuit: "IPLC-GB-AT-PRI"
+    router_primary_gw: "{{ lookup('env', 'ROUTER_PRIMARY_GW') | default('172.16.0.1', true) }}"
+    router_backup_gw: "{{ lookup('env', 'ROUTER_BACKUP_GW') | default('172.16.1.1', true) }}"
+
+  tasks:
+    - name: Push failover routing config
+      block:
+        - name: Remove primary route and add backup route
+          cisco.ios.ios_config:
+            lines:
+              - "no ip route 0.0.0.0 0.0.0.0 {{ router_primary_gw }}"
+              - "ip route 0.0.0.0 0.0.0.0 {{ router_backup_gw }}"
+            save_when: changed
+
+        - name: Router failover config applied
+          ansible.builtin.debug:
+            msg: >-
+              {{ inventory_hostname }}: primary route ({{ router_primary_gw }})
+              removed, backup route ({{ router_backup_gw }}) added
+            verbosity: 0
+
+      rescue:
+        - name: Router config push failed (non-fatal)
+          ansible.builtin.debug:
+            msg: >-
+              WARNING: Could not push config to {{ inventory_hostname }}.
+              Error: {{ ansible_failed_result.msg | default('unknown') }}.
+              Workflow continues to Deploy Report step.
+            verbosity: 0
