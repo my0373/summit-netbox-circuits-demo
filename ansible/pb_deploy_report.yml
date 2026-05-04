@@ -79,7 +79,7 @@
 
     - name: Query active circuits at A-side site
       ansible.builtin.uri:
-        url: "{{ netbox_url }}/api/circuits/circuits/?site_id={{ a_side_site.id }}&tag=dd&status=active"
+        url: "{{ netbox_url }}/api/circuits/circuits/?site_id={{ a_side_site.id }}&tag=gb-atlanta&status=active"
         headers:
           Authorization: "Token {{ netbox_token }}"
         return_content: true
@@ -88,7 +88,7 @@
 
     - name: Query active circuits at Z-side site
       ansible.builtin.uri:
-        url: "{{ netbox_url }}/api/circuits/circuits/?site_id={{ z_side_site.id }}&tag=dd&status=active"
+        url: "{{ netbox_url }}/api/circuits/circuits/?site_id={{ z_side_site.id }}&tag=gb-atlanta&status=active"
         headers:
           Authorization: "Token {{ netbox_token }}"
         return_content: true
@@ -119,10 +119,12 @@
         validate_certs: false
       register: backup_terms
 
-    - name: Set backup site labels
+    - name: Set backup site labels and gateway IPs from NetBox
       ansible.builtin.set_fact:
         backup_a_site: "{{ (backup_terms.json.results | selectattr('term_side', 'eq', 'A') | first).termination.display }}"
         backup_z_site: "{{ (backup_terms.json.results | selectattr('term_side', 'eq', 'Z') | first).termination.display }}"
+        primary_gw: "{{ (primary_terms.json.results | selectattr('term_side', 'eq', 'A') | first).custom_fields.gateway_ip }}"
+        backup_gw: "{{ (backup_terms.json.results | selectattr('term_side', 'eq', 'A') | first).custom_fields.gateway_ip }}"
 
     # ── Discover routers via cable connections (NetBox SoT) ───────────────────
     # Follow each circuit termination's cable to the connected router interface.
@@ -196,6 +198,8 @@
         a_site: "{{ a_side_site }}"
         z_site: "{{ z_side_site }}"
         candidates: "{{ backup_candidates }}"
+        primary_gw: "{{ primary_gw }}"
+        backup_gw: "{{ backup_gw }}"
 
     - name: Report generated
       ansible.builtin.debug:

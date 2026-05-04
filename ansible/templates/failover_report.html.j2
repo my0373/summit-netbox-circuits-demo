@@ -133,10 +133,10 @@
     Discovered automatically from circuit terminations in NetBox.
   </p>
   <ul class="router-list">
-{% for r in routers %}
+{% for name, group in routers | groupby('name') %}
     <li>
-      <span class="name">{{ r.name }}</span>
-      <span class="site">{{ r.site }} · {{ r.interface }}</span>
+      <span class="name">{{ name }}</span>
+      <span class="site">{{ (group | first).site }} · {{ group | map(attribute='interface') | join(', ') }}</span>
     </li>
 {% endfor %}
   </ul>
@@ -162,17 +162,17 @@
     <div class="step push">
       <h3>Router configuration updated</h3>
       <p>Routers identified via NetBox cable connections:</p>
-{% for r in routers %}
+{% for name, group in routers | groupby('name') %}
+{% set is_real = group | selectattr('is_real') | list | length > 0 %}
       <p style="margin-top: 0.75rem;">
-        <strong>{{ r.name }}</strong>
-        <span style="color: #B0BCCC;">({{ r.site }} · {{ r.interface }})</span>
-        — {{ r.circuit }} {{ r.side }}-side
-        {% if r.is_real %}<span style="color: #00C2A8;">[live config push]</span>{% else %}<span style="color: #B0BCCC;">[simulated]</span>{% endif %}
+        <strong>{{ name }}</strong>
+        <span style="color: #B0BCCC;">({{ (group | first).site }} · {{ group | map(attribute='interface') | join(', ') }})</span>
+        {% if is_real %}<span style="color: #00C2A8;">[live config push]</span>{% else %}<span style="color: #B0BCCC;">[simulated]</span>{% endif %}
       </p>
-{% if r.is_real and r.role == 'backup' %}
+{% if is_real %}
       <div class="cmd">conf t
-no ip route 0.0.0.0 0.0.0.0 172.16.0.1   ! remove primary default route
-ip route 0.0.0.0 0.0.0.0 172.16.1.1       ! activate backup route
+no ip route 0.0.0.0 0.0.0.0 {{ primary_gw }}   ! remove primary default route
+ip route 0.0.0.0 0.0.0.0 {{ backup_gw }}       ! activate backup route
 end</div>
 {% endif %}
 {% endfor %}
