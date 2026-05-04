@@ -6,6 +6,6 @@
 router_username: iosuser
 router_password: ""   # set by setup_infra.sh
 
-# Gateway IPs used in static route config.
-router_primary_gw: "172.16.0.1"
-router_backup_gw: "172.16.1.1"
+# Gateway IPs are no longer stored here — they are sourced at runtime from the
+# 'gateway_ip' custom field on circuit terminations in NetBox. Set this field on
+# the A-end termination of each circuit that has a real router attached.

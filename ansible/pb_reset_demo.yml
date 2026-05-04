@@ -7,6 +7,9 @@
 #   - IPLC-AR-AT-SEC → offline  (Buenos Aires secondary, down by default)
 #   - All other dd-tagged circuits → active
 #
+# Router gateway IPs are sourced at runtime from the 'gateway_ip' custom field
+# on each circuit's A-end termination in NetBox — not hardcoded in vars files.
+#
 # Usage:
 #   ansible-playbook ansible/pb_reset_demo.yml
 
@@ -25,8 +28,6 @@
       - IPLC-AR-AT-SEC
     router_username: "{{ lookup('env', 'ANSIBLE_NET_USERNAME') | default('iosuser', true) }}"
     router_password: "{{ lookup('env', 'ANSIBLE_NET_PASSWORD') | default(ansible_password | default(''), true) }}"
-    router_primary_gw: "172.16.0.1"
-    router_backup_gw: "172.16.1.1"
 
   tasks:
 
@@ -144,7 +145,7 @@
     # circuits can be added, but as long as the live router stays at one of
     # the demo sites with the dd tag, this still finds it.
 
-    - name: Get primary circuit's A and Z site IDs
+    - name: Get primary circuit's terminations (sites + gateway IP)
       ansible.builtin.uri:
         url: "{{ netbox_url }}/api/circuits/circuit-terminations/?circuit_id={{ primary.id }}"
         headers:
@@ -153,10 +154,49 @@
         validate_certs: false
       register: primary_terms_for_reset
 
-    - name: Set A/Z site IDs
+    - name: Set A/Z site IDs and primary gateway IP from NetBox
       ansible.builtin.set_fact:
         reset_a_site_id: "{{ (primary_terms_for_reset.json.results | selectattr('term_side', 'eq', 'A') | first).termination.id }}"
         reset_z_site_id: "{{ (primary_terms_for_reset.json.results | selectattr('term_side', 'eq', 'Z') | first).termination.id }}"
+        router_primary_gw: "{{ (primary_terms_for_reset.json.results | selectattr('term_side', 'eq', 'A') | first).custom_fields.gateway_ip }}"
+
+    - name: Get offline circuits' terminations (for backup gateway IPs)
+      ansible.builtin.uri:
+        url: "{{ netbox_url }}/api/circuits/circuit-terminations/?circuit_id={{ item.id }}&term_side=A"
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+        return_content: true
+        validate_certs: false
+      loop: >-
+        {{
+          all_circuits.json.results
+          | selectattr('cid', 'in', offline_circuits)
+          | list
+        }}
+      loop_control:
+        label: "{{ item.cid }}"
+      register: offline_terms_lookup
+
+    - name: Build map of offline circuit CID → gateway IP
+      ansible.builtin.set_fact:
+        offline_gateways: >-
+          {{
+            offline_gateways | default({})
+            | combine({
+                item.item.cid: (item.json.results | first).custom_fields.gateway_ip
+              })
+          }}
+      loop: "{{ offline_terms_lookup.results }}"
+      loop_control:
+        label: "{{ item.item.cid }}"
+      when: item.json.results | length > 0 and (item.json.results | first).custom_fields.gateway_ip
+
+    - name: Show gateway IPs sourced from NetBox
+      ansible.builtin.debug:
+        msg: >-
+          Gateway IPs from NetBox:
+          primary ({{ primary_circuit }}): {{ router_primary_gw }}
+          offline: {{ offline_gateways | default({}) }}
 
     - name: Query dd-tagged routers at both sites
       ansible.builtin.uri:
@@ -185,7 +225,7 @@
         ansible_host_key_checking: false
         ansible_ssh_common_args: "-o StrictHostKeyChecking=no"
         primary_gw: "{{ router_primary_gw }}"
-        backup_gw: "{{ router_backup_gw }}"
+        backup_gws: "{{ offline_gateways | default({}) | dict2items | map(attribute='value') | select('string') | list }}"
       loop: "{{ site_router_lookups.results | map(attribute='json.results') | flatten | list }}"
       loop_control:
         label: "{{ item.name }}"
@@ -211,11 +251,15 @@
 
     - name: Reset router config (best-effort — failures don't stop the reset)
       block:
-        - name: Remove backup route and restore primary route
+        - name: Remove backup route(s) and restore primary route
           cisco.ios.ios_config:
-            lines:
-              - "no ip route 0.0.0.0 0.0.0.0 {{ hostvars[inventory_hostname]['backup_gw'] }}"
-              - "ip route 0.0.0.0 0.0.0.0 {{ hostvars[inventory_hostname]['primary_gw'] }}"
+            lines: >-
+              {{
+                (hostvars[inventory_hostname]['backup_gws']
+                 | map('regex_replace', '^(.+)$', 'no ip route 0.0.0.0 0.0.0.0 \1')
+                 | list)
+                + ['ip route 0.0.0.0 0.0.0.0 ' + hostvars[inventory_hostname]['primary_gw']]
+              }}
             save_when: changed
 
         - name: Read running-config for verification
@@ -224,22 +268,29 @@
               - show running-config | include ^ip route
           register: running_routes
 
-        - name: Verify primary route present and backup route absent
+        - name: Verify primary route is present
           ansible.builtin.assert:
-            that:
-              - "(running_routes.stdout[0] | regex_search('ip route 0\\\\.0\\\\.0\\\\.0 0\\\\.0\\\\.0\\\\.0 ' + (hostvars[inventory_hostname]['primary_gw'] | regex_escape))) is not none"
-              - "(running_routes.stdout[0] | regex_search('ip route 0\\\\.0\\\\.0\\\\.0 0\\\\.0\\\\.0\\\\.0 ' + (hostvars[inventory_hostname]['backup_gw'] | regex_escape))) is none"
+            that: "(running_routes.stdout[0] | regex_search('ip route 0\\\\.0\\\\.0\\\\.0 0\\\\.0\\\\.0\\\\.0 ' + (hostvars[inventory_hostname]['primary_gw'] | regex_escape))) is not none"
             fail_msg: |
               Reset verification failed on {{ inventory_hostname }}!
-              Expected primary route ({{ hostvars[inventory_hostname]['primary_gw'] }}) to be present
-              and backup route ({{ hostvars[inventory_hostname]['backup_gw'] }}) to be absent.
-              Actual running-config:
-              {{ running_routes.stdout[0] }}
+              Primary route {{ hostvars[inventory_hostname]['primary_gw'] }} not found.
+              Actual running-config: {{ running_routes.stdout[0] }}
 
-        - name: Confirm route restored
+        - name: Verify backup routes are absent
+          ansible.builtin.assert:
+            that: "(running_routes.stdout[0] | regex_search('ip route 0\\\\.0\\\\.0\\\\.0 0\\\\.0\\\\.0\\\\.0 ' + (item | regex_escape))) is none"
+            fail_msg: |
+              Reset verification failed on {{ inventory_hostname }}!
+              Backup route {{ item }} still present after reset.
+              Actual running-config: {{ running_routes.stdout[0] }}
+          loop: "{{ hostvars[inventory_hostname]['backup_gws'] }}"
+
+        - name: Confirm routes restored
           ansible.builtin.debug:
             msg: |
-              Router {{ inventory_hostname }} reset OK — primary route active.
+              Router {{ inventory_hostname }} reset OK.
+              Primary route ({{ hostvars[inventory_hostname]['primary_gw'] }}) active.
+              Backup routes ({{ hostvars[inventory_hostname]['backup_gws'] | join(', ') }}) removed.
               {{ running_routes.stdout[0] }}
       rescue:
         - name: Router reset failed — surface clearly so it isn't missed

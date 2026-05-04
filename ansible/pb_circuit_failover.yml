@@ -10,8 +10,9 @@
 #   1. Queries the failed circuit from NetBox
 #   2. Discovers the A/Z sites from circuit terminations
 #   3. Finds the best available backup circuit between the same sites
-#   4. Simulates router configuration updates (stub — no real device access)
-#   5. Updates NetBox: marks primary offline, backup active
+#   4. Reads gateway IPs from the 'gateway_ip' custom field on A-end terminations
+#   5. Pushes route change to reachable routers (real EC2 Cisco C8000V instances)
+#   6. Updates NetBox: marks primary offline, backup active
 #
 # Report generation and deployment is handled by pb_deploy_report.yml,
 # which runs as the second step in the Circuit Failover workflow.
@@ -37,8 +38,6 @@
     report_dir: "{{ playbook_dir }}/reports"
     router_username: "{{ lookup('env', 'ANSIBLE_NET_USERNAME') | default('iosuser', true) }}"
     router_password: "{{ lookup('env', 'ANSIBLE_NET_PASSWORD') | default(ansible_password | default(''), true) }}"
-    router_primary_gw: "172.16.0.1"
-    router_backup_gw: "172.16.1.1"
 
   tasks:
 
@@ -104,6 +103,14 @@
       ansible.builtin.set_fact:
         a_side_site: "{{ (primary_terms.json.results | selectattr('term_side', 'eq', 'A') | first).termination }}"
         z_side_site: "{{ (primary_terms.json.results | selectattr('term_side', 'eq', 'Z') | first).termination }}"
+        primary_term_a: "{{ primary_terms.json.results | selectattr('term_side', 'eq', 'A') | first }}"
+
+    - name: Assert primary A-end termination has a gateway_ip configured
+      ansible.builtin.assert:
+        that: primary_term_a.custom_fields.gateway_ip is defined and primary_term_a.custom_fields.gateway_ip | length > 0
+        fail_msg: >-
+          Circuit {{ failed_circuit }} A-end termination (ID {{ primary_term_a.id }}) is missing
+          the 'gateway_ip' custom field. Set it in NetBox before running failover.
 
     - name: Show discovered sites
       ansible.builtin.debug:
@@ -177,10 +184,30 @@
         validate_certs: false
       register: backup_terms
 
-    - name: Set backup site labels
+    - name: Set backup site labels and extract gateway IPs from NetBox
       ansible.builtin.set_fact:
         backup_a_site: "{{ (backup_terms.json.results | selectattr('term_side', 'eq', 'A') | first).termination.display }}"
         backup_z_site: "{{ (backup_terms.json.results | selectattr('term_side', 'eq', 'Z') | first).termination.display }}"
+        backup_term_a: "{{ backup_terms.json.results | selectattr('term_side', 'eq', 'A') | first }}"
+        router_primary_gw: "{{ primary_term_a.custom_fields.gateway_ip }}"
+
+    - name: Assert backup A-end termination has a gateway_ip configured
+      ansible.builtin.assert:
+        that: backup_term_a.custom_fields.gateway_ip is defined and backup_term_a.custom_fields.gateway_ip | length > 0
+        fail_msg: >-
+          Backup circuit {{ backup.cid }} A-end termination (ID {{ backup_term_a.id }}) is missing
+          the 'gateway_ip' custom field. Set it in NetBox before running failover.
+
+    - name: Set backup gateway IP from NetBox
+      ansible.builtin.set_fact:
+        router_backup_gw: "{{ backup_term_a.custom_fields.gateway_ip }}"
+
+    - name: Show gateway IPs sourced from NetBox
+      ansible.builtin.debug:
+        msg: >-
+          Gateway IPs from NetBox:
+          primary ({{ failed_circuit }}): {{ router_primary_gw }}
+          backup  ({{ backup.cid }}):     {{ router_backup_gw }}
 
     # ── Discover routers via cable connections (NetBox SoT) ───────────────────
     # The realistic NetBox model: each circuit termination is connected to a
