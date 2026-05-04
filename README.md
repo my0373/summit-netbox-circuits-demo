@@ -31,7 +31,7 @@ Switch to the **AAP UI** and show the workflow running in real time.
 - Queries NetBox for the failed circuit using the `netbox.netbox` Ansible collection and resolves its A-side (GB-Bristol) and Z-side (US-Atlanta) sites from circuit terminations
 - Discovers all backup candidates with the `dd` tag present at both sites
 - Selects the best backup by committed bandwidth (10 Gbps primary → 5 Gbps backup)
-- Pushes failover routing config to routers at both ends
+- Pushes failover routing config to Cisco routers via `cisco.ios.ios_config` (routers without a management IP in NetBox log a simulated stub instead)
 - Updates NetBox via `netbox.netbox.netbox_circuit`: primary → `offline`, backup → `active`
 
 **Workflow Step 2 — Deploy Report** (`pb_deploy_report.yml`):
@@ -111,7 +111,7 @@ See [SETUP.md](SETUP.md) for full setup instructions including AAP configuration
 ```
 ansible/
   pb_setup_aap.yml          # Idempotent AAP + EDA + NetBox configuration playbook
-  pb_circuit_failover.yml   # Workflow Step 1: find backup, update NetBox
+  pb_circuit_failover.yml   # Workflow Step 1: find backup, push router config, update NetBox
   pb_deploy_report.yml      # Workflow Step 2: generate and publish HTML report
   pb_reset_demo.yml         # Reset all dd-tagged circuits to starting state
   pb_seed_netbox.yml        # Seed a fresh NetBox instance with demo data
@@ -124,12 +124,14 @@ ansible/
   inventory/
     localhost.yml            # Localhost inventory for local execution
 collections/
-  requirements.yml          # netbox.netbox, ansible.controller, ansible.eda
+  requirements.yml          # netbox.netbox, cisco.ios, ansible.controller, ansible.eda, etc.
 infra/
-  main.tf                   # Terraform — EC2 report server + MCP server
+  main.tf                   # Terraform — EC2 report server + Cisco router
 rulebooks/
   rulebook.yml              # EDA rulebook for Event-Driven Ansible
-setup.sh / reset.sh         # Helper scripts
+ansible-navigator.yml       # Project-wide navigator config (EE image, env injection)
+run-playbook.sh             # Wrapper — runs playbooks inside the EE via ansible-navigator
+setup.sh / reset.sh         # Setup and reset helper scripts
 DEMO.md                     # Full scenario and architecture reference
 SETUP.md                    # Setup and configuration guide
 ```

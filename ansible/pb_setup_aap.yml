@@ -46,6 +46,7 @@
 
   vars:
     aap_org_name: "SummitCollection"
+    controller_api_base: "{{ lookup('env', 'AAP_URL') }}/api/controller"
     github_repo: "https://github.com/my0373/summit-netbox-circuits-demo"
     github_branch: "main"
     de_image: "registry.redhat.io/ansible-automation-platform-26/de-supported-rhel9:latest"
@@ -78,6 +79,7 @@
     ee_name: "{{ aap_org_name }} Execution Environment"
     ee_image: "quay.io/acme_corp/netbox-summit-2026-ee:v3.22"
     registry_cred_name: "{{ aap_org_name }} Container Registry"
+    rh_registry_cred_name: "{{ aap_org_name }} Red Hat Registry"
     galaxy_cred_name: "{{ aap_org_name }} Automation Hub"
     # EDA resource names
     de_name: "{{ aap_org_name }} Decision Environment"
@@ -344,12 +346,34 @@
       tags:
         - workflow
 
+    # ── EDA: Red Hat Registry credential ─────────────────────────────────────
+
+    - name: Create Red Hat Registry credential for EDA
+      ansible.eda.credential:
+        name: "{{ rh_registry_cred_name }}"
+        organization_name: "{{ aap_org_name }}"
+        credential_type_name: "Container Registry"
+        inputs:
+          host: "registry.redhat.io"
+          username: "{{ lookup('env', 'RH_REGISTRY_USERNAME') }}"
+          password: "{{ lookup('env', 'RH_REGISTRY_PASSWORD') }}"
+        description: >-
+          Red Hat Customer Portal credentials for pulling
+          Decision Environment images from registry.redhat.io
+        state: present
+      when: lookup('env', 'RH_REGISTRY_USERNAME') | length > 0
+      tags:
+        - eda
+        - credentials
+
     # ── EDA: Decision Environment ─────────────────────────────────────────────
 
     - name: Ensure decision environment exists
       ansible.eda.decision_environment:
         name: "{{ de_name }}"
         image_url: "{{ de_image }}"
+        credential: "{{ rh_registry_cred_name if lookup('env', 'RH_REGISTRY_USERNAME') | length > 0 else omit }}"
+        pull_policy: missing
         organization_name: "{{ aap_org_name }}"
         description: >-
           Decision environment for Summit NetBox
@@ -379,7 +403,7 @@
         organization_name: "{{ aap_org_name }}"
         credential_type_name: "Red Hat Ansible Automation Platform"
         inputs:
-          host: "{{ lookup('env', 'AAP_URL') }}"
+          host: "{{ controller_api_base }}"
           username: "{{ lookup('env', 'AAP_USERNAME') }}"
           password: "{{ lookup('env', 'AAP_PASSWORD') }}"
           verify_ssl: false
@@ -440,7 +464,7 @@
     - name: Look up workflow template ID for webhook URL
       ansible.builtin.uri:
         url: >-
-          {{ lookup('env', 'AAP_URL') }}/api/controller/v2/workflow_job_templates/?name={{ workflow_name | urlencode }}
+          {{ controller_api_base }}/v2/workflow_job_templates/?name={{ workflow_name | urlencode }}
         method: GET
         user: "{{ lookup('env', 'AAP_USERNAME') }}"
         password: "{{ lookup('env', 'AAP_PASSWORD') }}"
@@ -453,7 +477,7 @@
     - name: Set workflow launch URL
       ansible.builtin.set_fact:
         workflow_launch_url: >-
-          {{ lookup('env', 'AAP_URL') }}/api/controller/v2/workflow_job_templates/{{ wf_lookup.json.results[0].id }}/launch/
+          {{ controller_api_base }}/v2/workflow_job_templates/{{ wf_lookup.json.results[0].id }}/launch/
       tags:
         - netbox
 
@@ -767,4 +791,5 @@
               Event Rule:       {{ netbox_webhook_name }} (circuits.circuit → object_updated)
               {{ 'Report Server:   ' ~ report_server_host ~ ':' ~ report_server_port if report_server_host | length > 0 else '' }}
               {{ 'Router Cred:     ' ~ router_cred_name ~ ' (' ~ router_ip ~ ')' if router_ip | length > 0 else '' }}
+              {{ 'RH Registry:     ' ~ rh_registry_cred_name if lookup('env', 'RH_REGISTRY_USERNAME') | length > 0 else 'RH Registry:     (not configured — DE uses pull_policy=missing)' }}
         verbosity: 0

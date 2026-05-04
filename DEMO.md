@@ -87,7 +87,7 @@ NetBox                          Ansible Automation Platform 2.6
 4. Queries all `dd`-tagged circuits at both sites
 5. Finds circuits present at both ends (excluding the failed one) — these are backup candidates
 6. Selects the backup with the highest committed bandwidth
-7. Pushes failover routing config to the routers at both sites
+7. Pushes failover routing config to Cisco routers at both sites via `cisco.ios.ios_config` (routers without a management IP in NetBox log a simulated stub instead)
 8. Updates NetBox via `netbox.netbox.netbox_circuit`: primary circuit -> offline, backup circuit -> active
 
 ### Step 2 — Deploy Report (`pb_deploy_report.yml`)

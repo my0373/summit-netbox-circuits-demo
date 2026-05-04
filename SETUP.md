@@ -4,9 +4,10 @@
 
 - **Ansible Automation Platform 2.6** — containerized deployment (all-in-one or growth topology)
 - **NetBox** — NetBox Cloud or self-hosted instance with Visual Explorer and Copilot
-- `ansible-navigator` and `ansible-rulebook`
+- `ansible-navigator` (all playbooks run inside the project Execution Environment)
+- Podman or Docker (container engine for ansible-navigator)
 - AWS CLI configured for `eu-west-2` (for report/MCP server infrastructure)
-- Terraform
+- Terraform (for infrastructure provisioning)
 - Podman (for local testing)
 
 ---
@@ -24,13 +25,22 @@ Copy `.env.example` to `.env` and fill in:
 | `AAP_PASSWORD` | Yes | AAP password |
 | `AAP_TOKEN` | Yes | AAP OAuth token — used by the NetBox webhook to launch the workflow |
 | `EDA_STREAM_TOKEN` | Yes | Shared token for NetBox → EDA webhook authentication (any strong random string) |
+| `REGISTRY_HOST` | No | Container registry host for EE images (default: `quay.io`) |
+| `REGISTRY_USERNAME` | No | Registry username (omit for public images) |
+| `REGISTRY_PASSWORD` | No | Registry password |
+| `RH_REGISTRY_USERNAME` | No | Red Hat Customer Portal username — for pulling DE image from `registry.redhat.io` if not already present on AAP |
+| `RH_REGISTRY_PASSWORD` | No | Red Hat Customer Portal password |
+| `AH_URL` | No | Automation Hub URL (default: `https://console.redhat.com/api/automation-hub/`) |
+| `AH_TOKEN` | No | Automation Hub token |
 | `REPORT_SERVER_HOST` | No | IP or hostname of the report web server |
 | `REPORT_SERVER_PORT` | No | SSH port for report server (default: `2222`) |
-| `REPORT_URL` | No | Public URL where the report is served |
+| `REPORT_URL` | No | Public URL where the report is served (derived automatically if empty) |
 | `ROUTER_IP` | No | Management IP of the Cisco router |
 | `ROUTER_PASSWORD` | No | Password for the router Network credential |
 | `ROUTER_USERNAME` | No | Router username (default: `iosuser`) |
-| `PRIVATE_KEY_PATH` | No | Path to SSH private key for infrastructure VMs |
+| `ROUTER_PRIMARY_GW` | No | Primary circuit gateway IP (default: `172.16.0.1`) |
+| `ROUTER_BACKUP_GW` | No | Backup circuit gateway IP (default: `172.16.1.1`) |
+| `PRIVATE_KEY_PATH` | No | Absolute path to SSH private key for infrastructure VMs |
 
 `.env` is gitignored and will never be committed.
 
@@ -44,36 +54,47 @@ AAP 2.6 requires the following resources configured. The `pb_setup_aap.yml` play
 
 ### Automation Controller
 
+All resources are scoped to the `SummitCollection` organization (configurable via `aap_org_name` in `pb_setup_aap.yml`).
+
 | Resource | Name | Details |
 |---|---|---|
-| Organization | Summit | All resources scoped to this org |
-| Project | Summit NetBox Circuits Demo | Git source — this repository, synced on launch |
-| Inventory | Summit Demo - Localhost | Localhost + report server hosts |
-| Credential | NetBox Cloud - Summit Demo | NetBox credential type — injects `NETBOX_API` + `NETBOX_TOKEN` |
-| Credential | Summit Demo Report Server SSH | Machine credential for report server (SSH key) |
-| Job Template | Circuit Failover | Runs `ansible/pb_circuit_failover.yml`, accepts `failed_circuit` extra var |
-| Job Template | Deploy Report | Runs `ansible/pb_deploy_report.yml`, accepts `failed_circuit` extra var |
-| Job Template | Reset Demo | Runs `ansible/pb_reset_demo.yml` |
-| Workflow Template | Circuit Failover Workflow | Step 1: Circuit Failover → (on success) → Step 2: Deploy Report |
+| Credential | SummitCollection NetBox Cloud | NetBox credential type — injects `NETBOX_API` + `NETBOX_TOKEN` |
+| Credential | SummitCollection Container Registry | Quay.io registry for pulling the project EE image |
+| Credential | SummitCollection Automation Hub | Galaxy/Automation Hub for certified collections |
+| Credential | SummitCollection Report Server SSH | Machine credential for report server (SSH key, conditional) |
+| Credential | SummitCollection Network Router | Network credential for Cisco router (conditional) |
+| Inventory | SummitCollection Localhost | Localhost + report server hosts |
+| Project | SummitCollection NetBox Circuits Demo | Git source — this repository, synced on launch |
+| Execution Environment | SummitCollection Execution Environment | `quay.io/acme_corp/netbox-summit-2026-ee:v3.22` |
+| Job Template | SummitCollection Circuit Failover | Runs `pb_circuit_failover.yml`, accepts `failed_circuit` extra var |
+| Job Template | SummitCollection Deploy Report | Runs `pb_deploy_report.yml`, accepts `failed_circuit` extra var |
+| Job Template | SummitCollection Reset Demo | Runs `pb_reset_demo.yml` |
+| Workflow Template | SummitCollection Circuit Failover Workflow | Step 1: Circuit Failover → (on success) → Step 2: Deploy Report |
 
 ### Execution Environment
 
-The Controller job templates require an Execution Environment with:
-- `netbox.netbox` collection (>= 3.22.0)
-- `pynetbox` Python library
+The project EE (`quay.io/acme_corp/netbox-summit-2026-ee:v3.22`) includes all required collections and Python dependencies:
+- `netbox.netbox` >= 3.22.0, `ansible.controller`, `ansible.eda`
+- `cisco.ios`, `ansible.netcommon`, `ansible.utils`
+- `pynetbox` >= 7.6.0
+
+The same EE is used for both local runs (via `ansible-navigator.yml`) and AAP job templates.
 
 ### Event-Driven Ansible
 
 | Resource | Name | Details |
 |---|---|---|
-| Decision Environment | Summit Demo DE | `registry.redhat.io/ansible-automation-platform-26/de-supported-rhel9:latest` |
-| Project | Summit NetBox Circuits Demo | Same Git repository — EDA discovers `rulebooks/rulebook.yml` |
-| Credential | AAP Controller - Summit Demo | EDA credential for `run_workflow_template` action |
-| Credential | NetBox Webhook Token | Token Event Stream credential for webhook authentication |
-| Event Stream | NetBox Circuit Events | HTTP endpoint that receives NetBox circuit change webhooks |
-| Rulebook Activation | NetBox Circuit Failover | Runs `rulebook.yml` with the DE, listens for NetBox events |
+| Decision Environment | SummitCollection Decision Environment | `registry.redhat.io/ansible-automation-platform-26/de-supported-rhel9:latest` (pull policy: missing) |
+| Credential | SummitCollection Red Hat Registry | Container Registry credential for `registry.redhat.io` (optional — only needed if DE image not present) |
+| Project | SummitCollection EDA Project | Same Git repository — EDA discovers `rulebooks/rulebook.yml` |
+| Credential | SummitCollection EDA AAP Controller | EDA credential for `run_workflow_template` — host must include `/api/controller` path for AAP 2.6 gateway |
+| Credential | SummitCollection EDA Webhook Token | Token Event Stream credential for webhook authentication |
+| Event Stream | SummitCollection EDA Circuit Events | HTTP endpoint that receives NetBox circuit change webhooks |
+| Rulebook Activation | SummitCollection EDA Circuit Failover | Runs `rulebook.yml` with the DE, listens for NetBox events |
 
 The EDA rulebook activation receives webhooks from NetBox via the event stream, evaluates the circuit status condition, and launches the Circuit Failover Workflow on Automation Controller.
+
+**AAP 2.6 gateway note:** The EDA AAP Controller credential `host` must be set to `https://<aap-host>/api/controller` (not just the base URL). The AAP 2.6 unified gateway routes controller API requests through `/api/controller/v2/`.
 
 ### NetBox Integration
 
@@ -92,12 +113,9 @@ The EDA rulebook activation receives webhooks from NetBox via the event stream, 
 # 1. Initial setup — creates .env from .env.example
 ./setup.sh
 # Fill in .env with your NetBox, AAP, and EDA credentials
-
-# 2. Install required Ansible collections
-ansible-galaxy collection install -r collections/requirements.yml
 ```
 
-All AAP, EDA, and NetBox resources are created by `pb_setup_aap.yml` using the `ansible.controller`, `ansible.eda`, and `netbox.netbox` collections. No Python dependencies required.
+All collections are bundled in the project EE — no `ansible-galaxy install` needed. All AAP, EDA, and NetBox resources are created by `pb_setup_aap.yml`.
 
 ### Option A: With Terraform (full demo with AWS infrastructure)
 
@@ -136,28 +154,19 @@ When an infrastructure variable is empty:
 
 ## Running Playbooks
 
-### With ansible-navigator (recommended)
+All playbooks run inside the project EE via `ansible-navigator`. The `ansible-navigator.yml` config handles the EE image, env injection (via `--env-file .env`), and output mode.
 
 ```bash
-ansible-navigator run ansible/pb_circuit_failover.yml \
-  -i ansible/inventory/localhost.yml \
-  --eei <your-ee-image> \
-  --mode stdout --penv NETBOX_URL --penv NETBOX_TOKEN
-```
-
-### With the wrapper script
-
-```bash
-# Sources .env and runs ansible-playbook directly
+# Using the wrapper script (recommended)
 ./run-playbook.sh ansible/pb_circuit_failover.yml
 ./run-playbook.sh ansible/pb_deploy_report.yml --extra-vars "failed_circuit=IPLC-GB-AT-PRI"
-```
+./run-playbook.sh ansible/pb_setup_aap.yml
 
-### Resetting between demo runs
-
-```bash
+# Reset between demo runs
 ./reset.sh
 ```
+
+To override the EE image, set `EE_IMAGE` before running or edit `ansible-navigator.yml`.
 
 ---
 
