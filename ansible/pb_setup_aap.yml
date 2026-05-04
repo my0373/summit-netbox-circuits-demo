@@ -47,7 +47,7 @@
   vars:
     aap_org_name: "SummitCollection"
     controller_api_base: "{{ lookup('env', 'AAP_URL') }}/api/controller"
-    github_repo: "https://github.com/my0373/summit-netbox-circuits-demo"
+    github_repo: "https://github.com/leogallego/summit-netbox-circuits-demo"
     github_branch: "main"
     de_image: "registry.redhat.io/ansible-automation-platform-26/de-supported-rhel9:latest"
     eda_stream_token: "{{ lookup('env', 'EDA_STREAM_TOKEN') }}"
