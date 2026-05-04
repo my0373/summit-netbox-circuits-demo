@@ -24,6 +24,7 @@
 
   vars:
     failed_circuit: "IPLC-GB-AT-PRI"
+    report_filename: "failover_report.html"
     report_dir: "{{ playbook_dir }}/reports"
 
   tasks:
@@ -159,7 +160,7 @@
     - name: Generate HTML failover report
       ansible.builtin.template:
         src: templates/failover_report.html.j2
-        dest: "{{ report_dir }}/failover_report.html"
+        dest: "{{ report_dir }}/{{ report_filename }}"
         mode: "0644"
         backup: true
       vars:
@@ -173,7 +174,7 @@
 
     - name: Report generated
       ansible.builtin.debug:
-        msg: "Report generated: {{ report_dir }}/failover_report.html"
+        msg: "Report generated: {{ report_dir }}/{{ report_filename }}"
         verbosity: 0
 
 # ── Play 2: Register report server (if configured) ────────────────────────────
@@ -182,18 +183,25 @@
   hosts: localhost
   gather_facts: false
 
+  vars:
+    report_server_host: "{{ lookup('env', 'REPORT_SERVER_HOST') }}"
+    report_server_port: "{{ lookup('env', 'REPORT_SERVER_PORT') | default('2222', true) }}"
+    report_url: "{{ lookup('env', 'REPORT_URL') }}"
+    report_filename: "failover_report.html"
+
   tasks:
     - name: Skip if no report server configured
       ansible.builtin.meta: end_play
-      when: report_server_host | default('') | length == 0
+      when: report_server_host | length == 0
 
     - name: Add report server to dynamic inventory
       ansible.builtin.add_host:
         name: "{{ report_server_host }}"
         groups: report_servers
-        ansible_port: "{{ report_server_port | default(2222) }}"
-        ansible_user: "{{ report_server_user | default('ec2-user') }}"
-        report_url: "{{ report_url | default('https://' + report_server_host + '/failover_report.html') }}"
+        ansible_port: "{{ report_server_port }}"
+        ansible_user: "ec2-user"
+        report_filename: "{{ report_filename }}"
+        report_url: "{{ report_url | default('https://' + report_server_host + '/' + report_filename, true) }}"
 
 # ── Play 3: Publish report to web server ──────────────────────────────────────
 
@@ -211,8 +219,8 @@
 
     - name: Upload failover report
       ansible.builtin.copy:
-        src: "{{ playbook_dir }}/reports/failover_report.html"
-        dest: /var/www/html/failover_report.html
+        src: "{{ playbook_dir }}/reports/{{ report_filename }}"
+        dest: "/var/www/html/{{ report_filename }}"
         mode: "0644"
         backup: true
       become: true

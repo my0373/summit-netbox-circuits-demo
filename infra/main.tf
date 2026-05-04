@@ -177,14 +177,106 @@ resource "aws_instance" "mcp_server" {
   }
 }
 
+# ── Security Group: Cisco Router ──────────────────────────────────────────────
+
+resource "aws_security_group" "cisco_router" {
+  name        = "RedhatSummitEDADemo-cisco-router"
+  description = "Summit demo Cisco router - SSH on standard port 22 for Ansible"
+
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "SSH for Ansible (network_cli)"
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "All outbound"
+  }
+}
+
+# ── Cisco C8000V AMI (dynamic lookup by product code) ─────────────────────────
+
+data "aws_ami" "cisco_c8kv" {
+  owners      = ["aws-marketplace"]
+  most_recent = true
+
+  filter {
+    name   = "name"
+    values = ["Cisco-C8K-*"]
+  }
+
+  filter {
+    name   = "product-code"
+    values = ["3ycwqehancx46bkpb3xkifiz5"]
+  }
+
+  filter {
+    name   = "state"
+    values = ["available"]
+  }
+}
+
+# ── EC2 Instance: Cisco Router ─────────────────────────────────────────────────
+# Cisco Catalyst 8000V for SD-WAN & Routing (AWS Marketplace subscription required).
+# AMI discovered automatically — no hardcoded ID needed.
+# Auth: local IOS user (iosuser/iospass) set via userdata; no AWS key pair.
+# Boot time is 5–10 minutes; setup_infra.sh waits for port 22 before continuing.
+
+resource "aws_instance" "cisco_router" {
+  ami                    = data.aws_ami.cisco_c8kv.id
+  instance_type          = var.router_instance_type
+  vpc_security_group_ids = [aws_security_group.cisco_router.id]
+
+  user_data = templatefile("${path.module}/userdata_router.tpl", {
+    router_password = var.router_password
+  })
+
+  tags = {
+    Name = "RedhatSummitEDADemo-router"
+  }
+
+  root_block_device {
+    volume_size = 16
+    volume_type = "gp3"
+
+    tags = {
+      Name  = "RedhatSummitEDADemo-router"
+      owner = "myork@netboxlabs.com"
+    }
+  }
+}
+
 # ── Elastic IPs ────────────────────────────────────────────────────────────────
 
 resource "aws_eip" "report_server" {
   instance = aws_instance.report_server.id
   domain   = "vpc"
+
+  tags = {
+    Name = "RedhatSummitEDADemo-report-eip"
+  }
 }
 
 resource "aws_eip" "mcp_server" {
   instance = aws_instance.mcp_server.id
   domain   = "vpc"
+
+  tags = {
+    Name = "RedhatSummitEDADemo-mcp-eip"
+  }
+}
+
+resource "aws_eip" "cisco_router" {
+  instance = aws_instance.cisco_router.id
+  domain   = "vpc"
+
+  tags = {
+    Name = "RedhatSummitEDADemo-router-eip"
+  }
 }

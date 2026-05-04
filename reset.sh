@@ -13,12 +13,14 @@ set -a
 source .env
 set +a
 
+REPORT_URL="${REPORT_URL:-https://<report_server_host>/failover_report.html}"
+
 echo "Resetting demo circuits to active..."
 ansible-playbook ansible/pb_reset_demo.yml \
   -i ansible/inventory/localhost.yml
 
 echo ""
-cat << 'NEXTSTEPS'
+cat << NEXTSTEPS
 ========================================================
   Reset complete — you're ready to run the demo:
 ========================================================
@@ -39,7 +41,7 @@ cat << 'NEXTSTEPS'
      and the backup circuit appears active.
 
   5. Open the incident report:
-       https://13.41.146.206/failover_report.html
+       $REPORT_URL
 
   6. Ask Claude (via NetBox MCP):
        "What is the current status of IPLC-GB-AT-PRI?"

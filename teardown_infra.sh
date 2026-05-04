@@ -65,10 +65,21 @@ cd "$SCRIPT_DIR"
 echo ""
 echo "Cleaning up generated files..."
 
-if [ -f "$SCRIPT_DIR/ansible/vars/infra.yml" ]; then
-  cp "$SCRIPT_DIR/ansible/vars/infra.yml.example" "$SCRIPT_DIR/ansible/vars/infra.yml"
-  echo "  ansible/vars/infra.yml reset to empty placeholder."
-fi
+clear_env_var() {
+  local key="$1" file="$SCRIPT_DIR/.env"
+  if [ -f "$file" ]; then
+    sed -i "s|^${key}=.*|${key}=|" "$file"
+  fi
+}
+
+clear_env_var REPORT_SERVER_HOST
+clear_env_var REPORT_SERVER_PORT
+clear_env_var REPORT_URL
+clear_env_var ROUTER_IP
+clear_env_var ROUTER_PASSWORD
+clear_env_var ROUTER_USERNAME
+clear_env_var PRIVATE_KEY_PATH
+echo "  Infrastructure variables cleared from .env."
 
 echo ""
 cat << 'NEXTSTEPS'

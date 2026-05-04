@@ -4,12 +4,16 @@
 # Provisions the Summit Demo infrastructure on AWS via Terraform:
 #   - Report server: nginx HTTPS, serves the AAP-generated failover report
 #   - MCP server: NetBox read-only MCP server accessed via SSH stdio
+#   - Cisco router: C8000v for real IOS config demo (A-side)
 #
-# Then registers both VMs with AAP (Machine credential + report server host).
+# Then registers VMs with AAP and updates gb-brs-rtr-01 primary IP in NetBox.
 #
 # Prerequisites:
 #   1. Run ./setup.sh (creates .env)
 #   2. Run: ./run-playbook.sh ansible/pb_setup_aap.yml (configures AAP)
+#   3. Accept the Cisco C8000V (product: Cisco Catalyst 8000V Edge Software BYOL)
+#      terms on AWS Marketplace for your region — no AMI ID needed, Terraform
+#      discovers it automatically by product code.
 #
 # Usage: ./setup_infra.sh
 
@@ -24,6 +28,31 @@ eval "$(GRANTED_ALIAS_INSTALLED=true assume --region eu-west-2)" || {
 
 AWS_ACCOUNT=$(aws sts get-caller-identity --region eu-west-2 --query Account --output text)
 echo "AWS credentials OK (account: $AWS_ACCOUNT, region: eu-west-2)"
+
+# ── EIP headroom check ────────────────────────────────────────────────────────
+# This demo needs 3 EIPs; the default AWS limit is 5 per region.
+echo ""
+echo "Checking existing EIPs in eu-west-2..."
+ALL_COUNT=$(aws ec2 describe-addresses --region eu-west-2 \
+  --query 'length(Addresses)' --output text 2>/dev/null || echo 0)
+
+AVAILABLE=$((5 - ALL_COUNT))
+
+echo "  $ALL_COUNT/5 EIPs in use. This demo needs 3."
+
+if [ "$AVAILABLE" -lt 3 ]; then
+  echo ""
+  echo "  WARNING: Only $AVAILABLE EIP slot(s) free — this run needs 3 and will fail."
+  echo "  Release an unneeded EIP with:"
+  echo "    aws ec2 release-address --region eu-west-2 --allocation-id <ID>"
+  echo ""
+  aws ec2 describe-addresses --region eu-west-2 \
+    --query 'Addresses[*].{IP:PublicIp,ID:AllocationId,Instance:InstanceId,Name:Tags[?Key==`Name`]|[0].Value}' \
+    --output table 2>/dev/null
+  echo ""
+  read -r -p "  Press ENTER to continue anyway, or Ctrl-C to abort..."
+fi
+echo ""
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 INFRA_DIR="$SCRIPT_DIR/infra"
@@ -40,18 +69,25 @@ echo "========================================================"
 echo "  Step 1: Terraform — provision VMs"
 echo "========================================================"
 
+# Generate a fresh secure router password for every provisioning run.
+# Alphanumeric only (IOS-XE compatible), 24 characters.
+ROUTER_PASSWORD=$(openssl rand -base64 32 | tr -d '+/=\n' | cut -c1-24)
+
 cd "$INFRA_DIR"
 terraform init -upgrade -input=false
 
-# Pass the NetBox token to Terraform so the MCP VM can be configured
+# Cisco C8000V AMI is discovered automatically by product code — no ROUTER_AMI_ID needed.
+# You must accept the Marketplace terms for your region before running this script.
 terraform apply -auto-approve -input=false \
   -var="aws_region=eu-west-2" \
   -var="netbox_url=${NETBOX_URL}" \
-  -var="netbox_token=${NETBOX_TOKEN}"
+  -var="netbox_token=${NETBOX_TOKEN}" \
+  -var="router_password=${ROUTER_PASSWORD}"
 
 # Capture outputs
 REPORT_IP=$(terraform output -raw report_server_ip)
 MCP_IP=$(terraform output -raw mcp_server_ip)
+ROUTER_IP=$(terraform output -raw router_ip)
 SSH_PORT=$(terraform output -raw ssh_port)
 PRIVATE_KEY_PATH=$(realpath "$KEYS_DIR/summit-demo.pem")
 REPORT_URL=$(terraform output -raw report_url)
@@ -59,26 +95,28 @@ REPORT_URL=$(terraform output -raw report_url)
 echo ""
 echo "  Report server:  $REPORT_IP  ($REPORT_URL)"
 echo "  MCP server:     $MCP_IP"
-echo "  SSH port:       $SSH_PORT"
+echo "  Cisco router:   $ROUTER_IP"
+echo "  SSH port:       $SSH_PORT (Linux VMs) / 22 (router)"
 echo "  Private key:    $PRIVATE_KEY_PATH"
 
 cd "$SCRIPT_DIR"
 
 echo ""
 echo "========================================================"
-echo "  Step 2: Wait for SSH on both VMs"
+echo "  Step 2: Wait for SSH on all VMs"
 echo "========================================================"
 
 wait_for_ssh() {
   local ip=$1
   local label=$2
-  echo -n "  Waiting for SSH on $label ($ip:$SSH_PORT)..."
+  local port=${3:-$SSH_PORT}
+  echo -n "  Waiting for SSH on $label ($ip:$port)..."
   for i in $(seq 1 48); do
     if ssh -o StrictHostKeyChecking=no \
            -o ConnectTimeout=5 \
            -o BatchMode=yes \
            -i "$PRIVATE_KEY_PATH" \
-           -p "$SSH_PORT" \
+           -p "$port" \
            "ec2-user@$ip" "echo ok" &>/dev/null; then
       echo " ready."
       return 0
@@ -89,35 +127,57 @@ wait_for_ssh() {
   echo " TIMEOUT (VM may still be initialising — check manually)"
 }
 
+wait_for_cisco_ssh() {
+  local ip=$1
+  # IOS-XE takes 5–10 minutes to boot and start accepting SSH.
+  # Use a port check (nc) — password auth makes BatchMode SSH impractical here.
+  # 36 attempts × 15s = 9 minutes maximum wait.
+  echo -n "  Waiting for Cisco router port 22 ($ip) — IOS-XE boot takes ~5–8 min..."
+  for i in $(seq 1 36); do
+    if nc -z -w5 "$ip" 22 &>/dev/null; then
+      echo " ready."
+      return 0
+    fi
+    echo -n "."
+    sleep 15
+  done
+  echo " TIMEOUT (router may still be booting — check manually with: ssh iosuser@$ip)"
+}
+
 wait_for_ssh "$REPORT_IP" "report-server"
 wait_for_ssh "$MCP_IP" "mcp-server"
+wait_for_cisco_ssh "$ROUTER_IP"
 
 echo ""
 echo "========================================================"
-echo "  Step 3: Write infra vars for Ansible"
+echo "  Step 3: Update .env with infrastructure variables"
 echo "========================================================"
 
-cat > "$SCRIPT_DIR/ansible/vars/infra.yml" << VARSEOF
----
-# Generated by setup_infra.sh — do not commit (gitignored)
-report_server_host: "$REPORT_IP"
-report_server_port: $SSH_PORT
-report_server_user: "ec2-user"
-report_server_path: "/var/www/html/failover_report.html"
-report_url: "$REPORT_URL"
-VARSEOF
+set_env_var() {
+  local key="$1" value="$2" file="$SCRIPT_DIR/.env"
+  if grep -q "^${key}=" "$file" 2>/dev/null; then
+    sed -i "s|^${key}=.*|${key}=${value}|" "$file"
+  else
+    echo "${key}=${value}" >> "$file"
+  fi
+}
 
-echo "  Written: ansible/vars/infra.yml"
+set_env_var REPORT_SERVER_HOST "$REPORT_IP"
+set_env_var REPORT_SERVER_PORT "$SSH_PORT"
+set_env_var REPORT_URL "$REPORT_URL"
+set_env_var ROUTER_IP "$ROUTER_IP"
+set_env_var ROUTER_PASSWORD "$ROUTER_PASSWORD"
+set_env_var ROUTER_USERNAME "iosuser"
+set_env_var PRIVATE_KEY_PATH "$PRIVATE_KEY_PATH"
+
+echo "  Updated .env with infrastructure variables."
 
 echo ""
 echo "========================================================"
-echo "  Step 4: Register report server with AAP"
+echo "  Step 4: Register VMs with AAP"
 echo "========================================================"
 
-./run-playbook.sh ansible/pb_setup_aap.yml \
-  -e report_server_ip="$REPORT_IP" \
-  -e report_server_port="$SSH_PORT" \
-  -e private_key_path="$PRIVATE_KEY_PATH"
+./run-playbook.sh ansible/pb_setup_aap.yml
 
 echo ""
 echo "========================================================"
@@ -137,6 +197,10 @@ cat << SUMMARY
   │                                                             │
   │  MCP server                                                 │
   │    SSH:  ssh -i infra/keys/summit-demo.pem -p $SSH_PORT ec2-user@$MCP_IP
+  │                                                             │
+  │  Cisco router (gb-brs-rtr-demo)                             │
+  │    SSH:  ssh iosuser@$ROUTER_IP
+  │    Creds: see .env
   └─────────────────────────────────────────────────────────────┘
 
   To register the NetBox MCP server with Claude Code, run:
