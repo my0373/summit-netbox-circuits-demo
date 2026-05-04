@@ -5,7 +5,7 @@
 #   - IPLC-GB-AT-PRI → active   (the circuit that "fails" in the demo)
 #   - IPLC-GB-AT-SEC → offline  (the backup, brought online by automation)
 #   - IPLC-AR-AT-SEC → offline  (Buenos Aires secondary, down by default)
-#   - All other dd-tagged circuits → active
+#   - All other gb-atlanta-tagged circuits → active
 #
 # Router gateway IPs are sourced at runtime from the 'gateway_ip' custom field
 # on each circuit's A-end termination in NetBox — not hardcoded in vars files.
@@ -31,16 +31,16 @@
 
   tasks:
 
-    - name: Fetch all circuits tagged 'dd'
+    - name: Fetch all circuits tagged 'gb-atlanta'
       ansible.builtin.uri:
-        url: "{{ netbox_url }}/api/circuits/circuits/?tag=dd&limit=100"
+        url: "{{ netbox_url }}/api/circuits/circuits/?tag=gb-atlanta&limit=100"
         headers:
           Authorization: "Token {{ netbox_token }}"
         return_content: true
         validate_certs: false
       register: all_circuits
 
-    # ── Set all dd-tagged circuits to active ──────────────────────────────────
+    # ── Set all gb-atlanta-tagged circuits to active ──────────────────────────
 
     - name: Find circuits that are not active
       ansible.builtin.set_fact:
