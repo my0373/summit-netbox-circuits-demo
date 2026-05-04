@@ -2,7 +2,7 @@
 
 Automated circuit failover driven by NetBox as the source of truth, built for Red Hat Summit 2026.
 
-A global enterprise runs WAN circuits between its UK hub (GB-Bristol) and a regional office in Atlanta (US-Atlanta). The primary circuit goes down. With NetBox and AAP, the entire failover — router reconfiguration, CMDB update, and incident report — happens in seconds with no manual intervention.
+A global enterprise runs WAN circuits between its UK hub (GB-Bristol) and a regional office in Atlanta (US-Atlanta). The primary circuit goes down. With NetBox and AAP, the entire failover — real router reconfiguration, CMDB update, and incident report — happens in seconds with no manual intervention.
 
 ## Demo Flow
 
@@ -20,14 +20,14 @@ Copilot PATCHes the circuit status to `offline` via the NetBox API.
 
 ### 3. Automation kicks in
 
-The status change fires a **NetBox event rule**, which sends a webhook to AAP launching the **Circuit Failover Workflow**. Watch the workflow run in the AAP UI.
+The status change fires a **NetBox event rule**, which sends a webhook to the EDA event stream. EDA's rulebook triggers the **Circuit Failover Workflow** in AAP. Watch the workflow run in the AAP UI.
 
 **Step 1 — Circuit Failover** (`pb_circuit_failover.yml`):
 
 - Queries NetBox for the failed circuit and resolves its A-side (GB-Bristol) and Z-side (US-Atlanta) sites from circuit terminations
 - Finds all active circuits with the `dd` tag present at both sites
 - Selects the best backup by committed bandwidth
-- Simulates pushing a failover routing config to routers at both ends (stub — no real devices in the demo)
+- Pushes a real failover routing config to `gb-brs-rtr-01` (Cisco C8000V EC2 instance) via `cisco.ios.ios_config`
 - PATCHes NetBox: primary circuit → `offline`, backup circuit → `active`
 
 **Step 2 — Deploy Report** (`pb_deploy_report.yml`):
@@ -42,10 +42,10 @@ Return to **Visual Explorer**. The failed circuit has disappeared from the map a
 
 ### 5. Open the incident report
 
-Open the report URL:
+Open the report URL shown in `ansible/vars/infra.yml` (populated by `setup_infra.sh`):
 
 ```
-https://13.41.146.206/failover_report.html
+https://<report_server_ip>/failover_report.html
 ```
 
 The report shows the full incident summary: which circuit failed, which backup was selected, committed bandwidth, router config changes, and timestamps.
@@ -64,6 +64,7 @@ Claude queries NetBox directly through the MCP server and confirms the circuit i
 
 - **NetBox is the trigger, not a passive CMDB.** One status change in Copilot kicks off the entire automation chain.
 - **No hardcoded backup mappings.** The playbook discovers the backup dynamically from NetBox. Add a new circuit and it's automatically a candidate next time.
+- **Real router config.** Ansible pushes actual IOS commands to a live Cisco C8000V via `cisco.ios.ios_config` — not a simulation.
 - **Two-step workflow.** Circuit update and report deployment are separate, auditable steps — visible in AAP's job history.
 - **Visual Explorer updates live.** The map reflects the new topology immediately after AAP writes back.
 - **The MCP server confirms it.** Claude can query NetBox directly at the end to confirm circuit status — no UI required.
@@ -74,10 +75,12 @@ Claude queries NetBox directly through the MCP server and confirms the circuit i
 
 | Component | Details |
 |---|---|
-| NetBox Cloud | `ryvr4514.cloud.netboxapp.com` — circuits, devices, Visual Explorer, Copilot, webhooks |
-| AAP Controller | `netbox-aap25.demoredhat.com` — workflow, job templates, project, inventory |
+| NetBox Cloud | `app.netboxlabs.com` — circuits, devices, [Visual Explorer](https://app.netboxlabs.com/visual-explorer), Copilot, webhooks |
+| AAP 2.5 Controller | `netbox-aap25.demoredhat.com` — workflow, job templates, EDA, credentials |
+| EDA | `network-netbox-de` decision environment, `network-netbox-ee-stable` execution environment |
 | Report server | AWS EC2 t3.micro (eu-west-2), nginx HTTPS, SSH on port 2222 |
 | MCP server | AWS EC2 t3.micro (eu-west-2), netboxlabs/netbox-mcp-server, SSH stdio |
+| Cisco router | AWS EC2 c5n.large (eu-west-2), Cisco C8000V IOS-XE — `gb-brs-rtr-01` A-side router |
 
 ---
 
@@ -85,22 +88,33 @@ Claude queries NetBox directly through the MCP server and confirms the circuit i
 
 ### Prerequisites
 
-- Python 3.11+ with `uv`
-- Ansible and `ansible-navigator`
-- AWS CLI configured for `eu-west-2`
+- Python 3.12+ and `uv`
+- Ansible (`brew install ansible` on macOS)
+- AWS CLI configured with access to `eu-west-2`
 - Terraform
+- AWS Marketplace subscription accepted for **Cisco Catalyst 8000V Edge Software** (BYOL) in `eu-west-2` — Terraform discovers the AMI automatically by product code; you just need the subscription active before running `setup_infra.sh`
 
 ### First-time setup
 
 ```bash
-cp .env.example .env
-# fill in .env with your credentials
+# 1. Initialise — creates .env from template and installs Python deps
+./setup.sh
 
-uv run --with requests python setup_aap.py   # creates AAP job templates, workflow, credentials, and NetBox webhook/event rule
+# 2. Fill in .env with your credentials
+#    (NETBOX_URL, NETBOX_TOKEN, AAP_URL, AAP_USERNAME, AAP_PASSWORD, EDA_STREAM_TOKEN)
 
-./setup_infra.sh                             # provisions EC2 instances with Terraform
+# 3. Configure AAP + EDA (idempotent — safe to re-run)
+uv run --with requests python setup_aap.py
 
-./reset.sh                                   # sets all dd-tagged circuits to active, ready to demo
+# 4. Provision AWS infrastructure (Terraform + VM setup + AAP inventory registration)
+#    This also updates gb-brs-rtr-01's primary IP in NetBox to the EC2 Elastic IP
+./setup_infra.sh
+
+# 5. Install Ansible collections (first time only)
+ansible-galaxy collection install -r ansible/requirements.yml --force
+
+# 6. Reset NetBox circuits to starting state and restore router primary route
+./reset.sh
 ```
 
 ### Running the demo
@@ -130,7 +144,7 @@ Copy `.env.example` to `.env` and fill in:
 | `AAP_URL` | AAP Controller base URL |
 | `AAP_USERNAME` | AAP username |
 | `AAP_PASSWORD` | AAP password |
-| `AAP_TOKEN` | AAP OAuth token — used by the NetBox webhook to launch the workflow |
+| `EDA_STREAM_TOKEN` | Shared token for the EDA event stream (must match what is configured in EDA) |
 
 `.env` is gitignored and will never be committed.
 
@@ -140,19 +154,33 @@ Copy `.env.example` to `.env` and fill in:
 
 ```
 ansible/
-  pb_circuit_failover.yml   # Step 1: find backup, update NetBox
+  pb_circuit_failover.yml   # Step 1: find backup, push router config, update NetBox
   pb_deploy_report.yml      # Step 2: generate and publish HTML report
-  pb_reset_demo.yml         # Reset all dd-tagged circuits to active
+  pb_reset_demo.yml         # Reset: restore circuits + router primary route
+  requirements.yml          # Ansible collection deps (cisco.ios, ansible.netcommon)
   templates/
     failover_report.html.j2 # Jinja2 HTML report template
   vars/
-    netbox_creds.yml        # Generated by setup.sh (gitignored)
+    netbox_creds.yml        # NetBox credentials (env-var driven)
+    network_creds.yml       # Router credentials (iosuser/iospass, gateway IPs)
     infra.yml               # Generated by setup_infra.sh (gitignored)
+    infra.yml.example       # Placeholder with empty values
 infra/
-  main.tf                   # Terraform — EC2 report server + MCP server
-rulebooks/                  # Legacy EDA rulebooks (not used — see eda_fail.md)
-setup_aap.py                # Idempotent AAP + NetBox configuration script
-setup.sh / reset.sh         # Helper scripts
+  main.tf                   # Terraform — report server, MCP server, Cisco router EC2
+  variables.tf              # Terraform variables
+  outputs.tf                # Outputs: IPs, SSH commands, MCP registration command
+  userdata.sh.tpl           # Report server cloud-init
+  userdata_mcp.sh.tpl       # MCP server cloud-init
+  userdata_router.tpl       # Cisco IOS-XE Day 0 bootstrap config
+rulebooks/
+  rulebook.yml              # EDA rulebook — triggers Circuit Failover Workflow on circuit status change
+slides/
+  make_deck.py              # Generates Summit_Demo_Deck.pptx
+setup_aap.py                # Idempotent AAP + EDA + NetBox configuration script
+setup.sh                    # First-time init
+setup_infra.sh              # Terraform + VM registration + NetBox router IP update
+reset.sh                    # Reset circuits + router route (run between demo attempts)
+teardown_infra.sh           # Terraform destroy + cleanup
 DEMO.md                     # Full scenario and architecture reference
-eda_fail.md                 # Why EDA was abandoned in favour of direct webhooks
+ansible.cfg                 # Disables SSH host key checking (required for Cisco router)
 ```

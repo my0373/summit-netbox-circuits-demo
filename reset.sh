@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Resets the demo to its starting state:
-#   - All dd-tagged circuits → active (except IPLC-GB-AT-SEC → offline)
+#   - All dd-tagged circuits → active (except IPLC-GB-AT-SEC and IPLC-AR-AT-SEC → offline)
 #   - Cisco router (gb-brs-rtr-01) primary route restored to 172.16.0.1
 
 set -e
