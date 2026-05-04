@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Wrapper that sources .env then runs an ansible-playbook command.
+# Wrapper that runs a playbook inside the project EE via ansible-navigator.
+# All settings (EE image, env injection, mode) come from ansible-navigator.yml.
+#
 # Usage: ./run-playbook.sh ansible/pb_circuit_failover.yml [extra args]
 #        ./run-playbook.sh ansible/pb_circuit_failover.yml --extra-vars "failed_circuit=IPLC-GB-JP-PRI"
 
@@ -15,8 +17,4 @@ if [ ! -f .env ]; then
   exit 1
 fi
 
-set -a
-source .env
-set +a
-
-ansible-playbook "$@" -i ansible/inventory/localhost.yml
+ansible-navigator run "$@" -i ansible/inventory/localhost.yml

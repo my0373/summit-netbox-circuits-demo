@@ -9,19 +9,15 @@ if [ ! -f .env ]; then
   exit 1
 fi
 
+# Source .env on the host only for the REPORT_URL used in the message below
 set -a
 source .env
 set +a
 
-# Export router credentials for Ansible network_cli connection
-export ANSIBLE_NET_USERNAME="${ROUTER_USERNAME:-iosuser}"
-export ANSIBLE_NET_PASSWORD="${ROUTER_PASSWORD:-}"
-
-
-REPORT_URL="${REPORT_URL:-https://<report_server_host>/failover_report_collection.html}"
+REPORT_URL="${REPORT_URL:-https://${REPORT_SERVER_HOST:-<report_server_host>}/failover_report_collection.html}"
 
 echo "Resetting demo circuits to active..."
-ansible-playbook ansible/pb_reset_demo.yml \
+ansible-navigator run ansible/pb_reset_demo.yml \
   -i ansible/inventory/localhost.yml
 
 echo ""

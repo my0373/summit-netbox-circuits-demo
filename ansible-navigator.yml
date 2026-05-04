@@ -1,0 +1,19 @@
+---
+ansible-navigator:
+  execution-environment:
+    container-engine: podman
+    enabled: true
+    image: quay.io/acme_corp/netbox-summit-2026-ee:v3.22
+    pull:
+      policy: never
+    container-options:
+      - "--env-file"
+      - ".env"
+
+  mode: stdout
+
+  playbook-artifact:
+    enable: false
+
+  logging:
+    level: warning
