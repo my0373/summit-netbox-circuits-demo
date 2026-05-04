@@ -118,11 +118,127 @@
       loop_control:
         label: "{{ item.cid }}"
 
+    # ── Discover routers for config reset ────────────────────────────────────────
+
+    - name: Query primary circuit terminations
+      ansible.builtin.set_fact:
+        primary_terms: >-
+          {{ query('netbox.netbox.nb_lookup', 'circuit-terminations',
+                   api_endpoint=netbox_url,
+                   token=netbox_token,
+                   api_filter='circuit_id=' ~ primary.id,
+                   validate_certs=netbox_validate_certs,
+                   raw_data=true) }}
+
+    - name: Set A-side and Z-side sites
+      ansible.builtin.set_fact:
+        a_side_site: "{{ (primary_terms | selectattr('term_side', 'eq', 'A') | first).termination }}"
+        z_side_site: "{{ (primary_terms | selectattr('term_side', 'eq', 'Z') | first).termination }}"
+      when: >-
+        (primary_terms | selectattr('term_side', 'eq', 'A') | list | length > 0) and
+        (primary_terms | selectattr('term_side', 'eq', 'Z') | list | length > 0)
+
+    - name: Query routers at A-side site
+      ansible.builtin.set_fact:
+        a_side_routers: >-
+          {{ query('netbox.netbox.nb_lookup', 'devices',
+                   api_endpoint=netbox_url,
+                   token=netbox_token,
+                   api_filter='site_id=' ~ a_side_site.id ~ ' role=router tag=dd',
+                   validate_certs=netbox_validate_certs,
+                   raw_data=true) }}
+      when: a_side_site is defined
+
+    - name: Query routers at Z-side site
+      ansible.builtin.set_fact:
+        z_side_routers: >-
+          {{ query('netbox.netbox.nb_lookup', 'devices',
+                   api_endpoint=netbox_url,
+                   token=netbox_token,
+                   api_filter='site_id=' ~ z_side_site.id ~ ' role=router tag=dd',
+                   validate_certs=netbox_validate_certs,
+                   raw_data=true) }}
+      when: z_side_site is defined
+
+    - name: Combine router list
+      ansible.builtin.set_fact:
+        all_routers: "{{ (a_side_routers | default([])) + (z_side_routers | default([])) }}"
+
+    - name: Add routers with real IPs to dynamic inventory
+      ansible.builtin.add_host:
+        name: "{{ item.name }}"
+        groups: reset_routers
+        ansible_host: "{{ item.primary_ip4.address | ansible.utils.ipaddr('address') }}"
+        ansible_user: "{{ lookup('env', 'ANSIBLE_NET_USERNAME') | default(lookup('env', 'ROUTER_USERNAME') | default('iosuser', true), true) }}"
+        ansible_password: "{{ lookup('env', 'ANSIBLE_NET_PASSWORD') | default(lookup('env', 'ROUTER_PASSWORD') | default(omit, true), true) }}"
+        ansible_network_os: cisco.ios.ios
+        ansible_connection: ansible.netcommon.network_cli
+        ansible_network_cli_ssh_type: paramiko
+      loop: >-
+        {{
+          all_routers
+          | selectattr('primary_ip4', 'defined')
+          | selectattr('primary_ip4', 'ne', none)
+          | list
+        }}
+      loop_control:
+        label: "{{ item.name }}"
+
     - name: All done
       ansible.builtin.debug:
         msg: >-
           Reset complete.
           {{ primary_circuit }} is Active. IPLC-GB-AT-SEC is Offline.
           {{ circuits_to_activate | length }} other circuit(s) restored to Active.
+          {{ (all_routers | selectattr('primary_ip4', 'defined') | selectattr('primary_ip4', 'ne', none) | list | length) }} router(s) queued for config reset.
           NetBox and Visual Explorer are back to starting state.
         verbosity: 0
+
+# ── Play 2: Reset router routing to primary ───────────────────────────────────
+# Only runs when routers with real IPs were discovered in Play 1.
+# Fatal: reset failures surface as errors (unlike failover, which must continue).
+
+- name: Reset router routing to primary
+  hosts: reset_routers
+  gather_facts: false
+  ignore_unreachable: true
+
+  vars:
+    router_primary_gw: "{{ lookup('env', 'ROUTER_PRIMARY_GW') | default('172.16.0.1', true) }}"
+    router_backup_gw: "{{ lookup('env', 'ROUTER_BACKUP_GW') | default('172.16.1.1', true) }}"
+
+  tasks:
+    - name: Restore primary routing config
+      block:
+        - name: Remove backup route and restore primary route
+          cisco.ios.ios_config:
+            lines:
+              - "no ip route 0.0.0.0 0.0.0.0 {{ router_backup_gw }}"
+              - "ip route 0.0.0.0 0.0.0.0 {{ router_primary_gw }}"
+            save_when: changed
+
+        - name: Verify primary route restored
+          cisco.ios.ios_command:
+            commands: "show running-config | include ip route"
+          register: verify_result
+
+        - name: Assert primary route is in running config
+          ansible.builtin.assert:
+            that: "router_primary_gw in verify_result.stdout[0]"
+            fail_msg: >-
+              Primary route ({{ router_primary_gw }}) not found
+              in running-config after reset
+
+        - name: Router reset config applied
+          ansible.builtin.debug:
+            msg: >-
+              {{ inventory_hostname }}: backup route ({{ router_backup_gw }})
+              removed, primary route ({{ router_primary_gw }}) restored
+            verbosity: 0
+
+      rescue:
+        - name: Router reset failed
+          ansible.builtin.fail:
+            msg: >-
+              Router reset failed for {{ inventory_hostname }}:
+              {{ ansible_failed_result.msg | default('unknown error') }}
