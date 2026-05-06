@@ -415,17 +415,33 @@ def main():
         })
         print(f"  Attached NetBox credential to Deploy Report template")
 
-    # Attach machine credential (SSH to report server) if available
+    # Attach machine credential (SSH to report server) if available.
+    # Re-fetch credentials to avoid stale data from before NetBox cred was attached.
     machine_creds = ctrl.get("/api/controller/v2/credentials/?credential_type__name=Machine")
     machine_cred = next(
         (c for c in machine_creds.get("results", []) if "Report Server" in c["name"]),
         None
     )
-    if machine_cred and machine_cred["id"] not in cred_ids:
-        ctrl.post(f"/api/controller/v2/job_templates/{jt_report_id}/credentials/", {
-            "id": machine_cred["id"], "associate": True,
-        })
-        print(f"  Attached SSH credential to Deploy Report template")
+    if machine_cred:
+        fresh_creds = ctrl.get(f"/api/controller/v2/job_templates/{jt_report_id}/credentials/")
+        fresh_cred_list = fresh_creds.get("results", [])
+        fresh_cred_ids = [c["id"] for c in fresh_cred_list]
+        if machine_cred["id"] in fresh_cred_ids:
+            print(f"  Machine credential already attached — skipping (key will be refreshed by register_report_server)")
+        else:
+            # Detach any other Machine credential already on the template to avoid 400.
+            for existing in fresh_cred_list:
+                cred_type = existing.get("credential_type")
+                is_machine = cred_type == 1 or (isinstance(cred_type, dict) and cred_type.get("id") == 1)
+                if is_machine:
+                    ctrl.post(f"/api/controller/v2/job_templates/{jt_report_id}/credentials/", {
+                        "id": existing["id"], "disassociate": True,
+                    })
+                    print(f"  Detached stale Machine credential [{existing['id']}]")
+            ctrl.post(f"/api/controller/v2/job_templates/{jt_report_id}/credentials/", {
+                "id": machine_cred["id"], "associate": True,
+            })
+            print(f"  Attached SSH credential to Deploy Report template")
 
     # ── Controller: Workflow Template — Circuit Failover Workflow ─────────────
     section("Controller: Workflow Template — Circuit Failover Workflow")
