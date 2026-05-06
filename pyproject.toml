@@ -6,5 +6,6 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "matplotlib>=3.10.9",
+    "paramiko>=4.0.0",
     "requests",
 ]

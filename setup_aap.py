@@ -65,9 +65,9 @@ NETBOX_TOKEN = _require("NETBOX_TOKEN")
 # Kept as an optional env var for reference / manual testing.
 AAP_TOKEN = os.getenv("AAP_TOKEN", "")
 
-# Router password — set from --router-password CLI arg before main() is called.
-# Populated in __main__ block so it can be overridden without touching the env.
+# Router credentials — populated from CLI args or infra.yml before main() is called.
 ROUTER_PASSWORD = ""
+ROUTER_IP = ""
 
 GITHUB_REPO  = "https://github.com/my0373/summit-netbox-circuits-demo"
 GITHUB_BRANCH = "main"
@@ -213,6 +213,46 @@ def ensure_netbox_cred_type(ctrl):
     return created["id"]
 
 
+def load_infra_vars():
+    """Load router_ip and router_password from ansible/vars/infra.yml if present."""
+    import re
+    infra_path = Path(__file__).parent / "ansible" / "vars" / "infra.yml"
+    if not infra_path.exists():
+        return {}
+    result = {}
+    with open(infra_path) as f:
+        for line in f:
+            m = re.match(r'^(router_ip|router_password):\s*"?([^"\n]+)"?\s*$', line)
+            if m:
+                result[m.group(1)] = m.group(2).strip('"')
+    return result
+
+
+def test_router_ssh(ip, username, password, port=22, timeout=10):
+    """Test SSH credentials against the router. Returns (ok, message)."""
+    import paramiko
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    try:
+        client.connect(
+            ip,
+            port=port,
+            username=username,
+            password=password,
+            timeout=timeout,
+            look_for_keys=False,
+            allow_agent=False,
+        )
+        client.close()
+        return True, "OK"
+    except paramiko.AuthenticationException:
+        return False, "Authentication failed — wrong username or password"
+    except paramiko.SSHException as e:
+        return False, f"SSH error: {e}"
+    except Exception as e:
+        return False, f"Connection error: {e}"
+
+
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def main():
@@ -272,8 +312,6 @@ def main():
     else:
         print(f"  Using built-in credential type: {net_cred_type['name']} (id={net_cred_type['id']})")
 
-    # Always patch the password — it's regenerated on every infra provisioning run.
-    # get_or_create returns the existing object without updating it, so we patch explicitly.
     _net_cred_data = {
         "name": "Summit Demo Router",
         "organization": ORG_ID,
@@ -287,15 +325,34 @@ def main():
 
     if _net_cred_data:
         existing_net_cred = ctrl.find("/api/controller/v2/credentials/", "Summit Demo Router")
-        if existing_net_cred:
-            net_cred = ctrl.patch(
-                f"/api/controller/v2/credentials/{existing_net_cred['id']}/",
-                {"inputs": {"username": "iosuser", "password": ROUTER_PASSWORD}},
-            )
-            print(f"  UPDATED Summit Demo Router [{net_cred['id']}] — password refreshed")
+        if not ROUTER_PASSWORD:
+            print("  SKIPPED — no router password available (pass --router-password or ensure ansible/vars/infra.yml exists)")
+            net_cred = existing_net_cred
         else:
-            net_cred = ctrl.post("/api/controller/v2/credentials/", _net_cred_data)
-            print(f"  CREATED Summit Demo Router [{net_cred['id']}]")
+            # Test credentials against the router before updating AAP
+            if ROUTER_IP:
+                print(f"  Testing SSH to router {ROUTER_IP}...", end="", flush=True)
+                ok, msg = test_router_ssh(ROUTER_IP, "iosuser", ROUTER_PASSWORD)
+                if ok:
+                    print(" OK")
+                else:
+                    print(f" FAILED: {msg}")
+                    print("  SKIPPED — credentials did not authenticate; AAP credential not updated")
+                    net_cred = existing_net_cred
+                    _net_cred_data = None  # skip create/patch below
+            else:
+                print("  WARNING: no router IP available for pre-flight test — updating AAP credential untested")
+
+            if _net_cred_data:
+                if existing_net_cred:
+                    net_cred = ctrl.patch(
+                        f"/api/controller/v2/credentials/{existing_net_cred['id']}/",
+                        {"inputs": {"username": "iosuser", "password": ROUTER_PASSWORD}},
+                    )
+                    print(f"  UPDATED Summit Demo Router [{net_cred['id']}] — password refreshed")
+                else:
+                    net_cred = ctrl.post("/api/controller/v2/credentials/", _net_cred_data)
+                    print(f"  CREATED Summit Demo Router [{net_cred['id']}]")
     else:
         net_cred = None
 
@@ -943,10 +1000,16 @@ if __name__ == "__main__":
     import urllib3
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-    # Set global so credential sections in main() pick it up
-    if args.router_password:
-        import builtins
-        globals()["ROUTER_PASSWORD"] = args.router_password
+    # Load router credentials: CLI args take priority, then fall back to infra.yml
+    infra = load_infra_vars()
+    globals()["ROUTER_PASSWORD"] = args.router_password or infra.get("router_password", "")
+    globals()["ROUTER_IP"] = args.update_router_ip or infra.get("router_ip", "")
+
+    if ROUTER_PASSWORD:
+        src = "CLI arg" if args.router_password else "ansible/vars/infra.yml"
+        print(f"  Router password loaded from {src}")
+    else:
+        print("  WARNING: no router password found — Summit Demo Router credential will not be updated")
 
     main()
 
