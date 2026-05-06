@@ -106,29 +106,6 @@ resource "aws_security_group" "report_server" {
   }
 }
 
-# ── Security Group: MCP Server ─────────────────────────────────────────────────
-
-resource "aws_security_group" "mcp_server" {
-  name        = "RedhatSummitEDADemo-mcp-server"
-  description = "Summit demo NetBox MCP server - non-standard SSH only (stdio over SSH)"
-
-  ingress {
-    from_port   = var.ssh_port
-    to_port     = var.ssh_port
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-    description = "SSH on non-standard port ${var.ssh_port}"
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-    description = "All outbound (NetBox API calls)"
-  }
-}
-
 # ── EC2 Instance: Report Server ────────────────────────────────────────────────
 
 resource "aws_instance" "report_server" {
@@ -151,35 +128,6 @@ resource "aws_instance" "report_server" {
 
     tags = {
       Name  = "RedhatSummitEDADemo-report"
-      owner = "myork@netboxlabs.com"
-    }
-  }
-}
-
-# ── EC2 Instance: MCP Server ───────────────────────────────────────────────────
-
-resource "aws_instance" "mcp_server" {
-  ami                    = data.aws_ami.amazon_linux_2023.id
-  instance_type          = var.mcp_instance_type
-  key_name               = aws_key_pair.summit_demo.key_name
-  vpc_security_group_ids = [aws_security_group.mcp_server.id]
-
-  user_data = templatefile("${path.module}/userdata_mcp.sh.tpl", {
-    ssh_port      = var.ssh_port
-    netbox_url    = var.netbox_url
-    netbox_token  = var.netbox_token
-  })
-
-  tags = {
-    Name = "RedhatSummitEDADemo-mcp"
-  }
-
-  root_block_device {
-    volume_size = 30
-    volume_type = "gp3"
-
-    tags = {
-      Name  = "RedhatSummitEDADemo-mcp"
       owner = "myork@netboxlabs.com"
     }
   }
@@ -268,15 +216,6 @@ resource "aws_eip" "report_server" {
 
   tags = {
     Name = "RedhatSummitEDADemo-report-eip"
-  }
-}
-
-resource "aws_eip" "mcp_server" {
-  instance = aws_instance.mcp_server.id
-  domain   = "vpc"
-
-  tags = {
-    Name = "RedhatSummitEDADemo-mcp-eip"
   }
 }
 

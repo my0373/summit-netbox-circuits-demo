@@ -3,7 +3,6 @@
 #
 # Provisions the Summit Demo infrastructure on AWS via Terraform:
 #   - Report server: nginx HTTPS, serves the AAP-generated failover report
-#   - MCP server: NetBox read-only MCP server accessed via SSH stdio
 #   - Cisco router: C8000v/CSR1000v for real IOS config demo (A-side)
 #
 # Then registers VMs with AAP and updates gb-brs-rtr-01 primary IP in NetBox.
@@ -43,7 +42,7 @@ ALL_COUNT=$(aws ec2 describe-addresses --region eu-west-3 \
 
 AVAILABLE=$((5 - ALL_COUNT))
 
-echo "  $ALL_COUNT/5 EIPs in use, $OWNED_COUNT tagged as yours. This demo needs 3."
+echo "  $ALL_COUNT/5 EIPs in use, $OWNED_COUNT tagged as yours. This demo needs 2."
 echo ""
 
 # Always show all EIPs with their tags so untagged/foreign ones are visible
@@ -58,9 +57,9 @@ ALL_EIPS=$(aws ec2 describe-addresses --region eu-west-3 \
   }' --output table 2>/dev/null)
 echo "$ALL_EIPS"
 
-if [ "$AVAILABLE" -lt 3 ]; then
+if [ "$AVAILABLE" -lt 2 ]; then
   echo ""
-  echo "  WARNING: Only $AVAILABLE EIP slot(s) free — this run needs 3 and will fail."
+  echo "  WARNING: Only $AVAILABLE EIP slot(s) free — this run needs 2 and will fail."
   echo "  Release an unneeded EIP with:"
   echo "    aws ec2 release-address --region eu-west-3 --allocation-id <ID>"
   echo ""
@@ -94,13 +93,10 @@ terraform init -upgrade -input=false
 # You must accept the Marketplace terms for eu-west-2 before running this script.
 terraform apply -auto-approve -input=false \
   -var="aws_region=eu-west-3" \
-  -var="netbox_url=${NETBOX_URL}" \
-  -var="netbox_token=${NETBOX_TOKEN}" \
   -var="router_password=${ROUTER_PASSWORD}"
 
 # Capture outputs
 REPORT_IP=$(terraform output -raw report_server_ip)
-MCP_IP=$(terraform output -raw mcp_server_ip)
 ROUTER_IP=$(terraform output -raw router_ip)
 SSH_PORT=$(terraform output -raw ssh_port)
 PRIVATE_KEY_PATH=$(realpath "$KEYS_DIR/summit-demo.pem")
@@ -108,7 +104,6 @@ REPORT_URL=$(terraform output -raw report_url)
 
 echo ""
 echo "  Report server:  $REPORT_IP  ($REPORT_URL)"
-echo "  MCP server:     $MCP_IP"
 echo "  Cisco router:   $ROUTER_IP"
 echo "  SSH port:       $SSH_PORT (Linux VMs) / 22 (router)"
 echo "  Private key:    $PRIVATE_KEY_PATH"
@@ -159,7 +154,6 @@ wait_for_cisco_ssh() {
 }
 
 wait_for_ssh "$REPORT_IP" "report-server"
-wait_for_ssh "$MCP_IP" "mcp-server"
 wait_for_cisco_ssh "$ROUTER_IP"
 
 echo ""
@@ -209,8 +203,6 @@ echo "========================================================"
 echo "  Done!"
 echo "========================================================"
 
-MCP_CMD=$(terraform -chdir="$INFRA_DIR" output -raw mcp_claude_add_command 2>/dev/null || echo "")
-
 cat << SUMMARY
 
   ┌─────────────────────────────────────────────────────────────┐
@@ -220,28 +212,11 @@ cat << SUMMARY
   │    URL:  $REPORT_URL
   │    SSH:  ssh -i infra/keys/summit-demo.pem -p $SSH_PORT ec2-user@$REPORT_IP
   │                                                             │
-  │  MCP server                                                 │
-  │    SSH:  ssh -i infra/keys/summit-demo.pem -p $SSH_PORT ec2-user@$MCP_IP
-  │                                                             │
   │  Cisco router (gb-brs-rtr-demo)                             │
   │    SSH:  ssh iosuser@$ROUTER_IP
   │    Creds: see ansible/vars/infra.yml (or run ./router_connect.sh)
   │    Note: NetBox gb-brs-rtr-01 primary IP updated to $ROUTER_IP
   └─────────────────────────────────────────────────────────────┘
-
-  To register the NetBox MCP server with Claude Code, run:
-
-  claude mcp add netbox-mcp \\
-    -e NETBOX_URL=${NETBOX_URL} \\
-    -e NETBOX_TOKEN=${NETBOX_TOKEN} \\
-    -e VERIFY_SSL=true \\
-    -- ssh -o StrictHostKeyChecking=no \\
-           -i $PRIVATE_KEY_PATH \\
-           -p $SSH_PORT \\
-           ec2-user@$MCP_IP \\
-           /home/ec2-user/netbox-mcp/.venv/bin/netbox-mcp-server
-
-  Then restart Claude Code and verify with: claude mcp list
 
   To tear down all infrastructure: cd infra && terraform destroy
 SUMMARY

@@ -15,33 +15,6 @@ output "report_server_ssh" {
   value       = "ssh -i infra/keys/summit-demo.pem -p ${var.ssh_port} ec2-user@${aws_eip.report_server.public_ip}"
 }
 
-# ── MCP Server ─────────────────────────────────────────────────────────────────
-
-output "mcp_server_ip" {
-  description = "Public IP of the MCP server"
-  value       = aws_eip.mcp_server.public_ip
-}
-
-output "mcp_server_ssh" {
-  description = "SSH command for the MCP server"
-  value       = "ssh -i infra/keys/summit-demo.pem -p ${var.ssh_port} ec2-user@${aws_eip.mcp_server.public_ip}"
-}
-
-output "mcp_claude_add_command" {
-  description = "Command to register the NetBox MCP server with Claude Code"
-  value       = <<-EOT
-    claude mcp add netbox-mcp \
-      -e NETBOX_URL=${var.netbox_url} \
-      -e NETBOX_TOKEN=<your-token> \
-      -e VERIFY_SSL=true \
-      -- ssh -o StrictHostKeyChecking=no \
-             -i ${path.module}/keys/summit-demo.pem \
-             -p ${var.ssh_port} \
-             ec2-user@${aws_eip.mcp_server.public_ip} \
-             /home/ec2-user/netbox-mcp/.venv/bin/netbox-mcp-server
-  EOT
-}
-
 # ── Cisco Router ───────────────────────────────────────────────────────────────
 
 output "router_ip" {

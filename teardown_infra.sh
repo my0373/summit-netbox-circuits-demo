@@ -3,7 +3,6 @@
 #
 # Tears down all AWS infrastructure provisioned by setup_infra.sh:
 #   - Report server EC2 instance + EIP
-#   - MCP server EC2 instance + EIP
 #   - Cisco router (C8000V) EC2 instance + EIP
 #   - Security groups, key pair
 #
@@ -49,9 +48,8 @@ echo "========================================================"
 echo ""
 echo "  The following AWS resources will be permanently deleted:"
 echo "    - Report server EC2 instance and Elastic IP"
-echo "    - MCP server EC2 instance and Elastic IP"
 echo "    - Cisco router (C8000V) EC2 instance and Elastic IP"
-echo "    - Security groups (report, MCP, router)"
+echo "    - Security groups (report, router)"
 echo "    - EC2 key pair (summit-demo-2026)"
 echo ""
 if [ -n "$ROUTER_IP" ]; then
@@ -85,8 +83,6 @@ _ROUTER_PW="${_ROUTER_PW:-unused-destroy-placeholder}"
 
 terraform destroy -auto-approve -input=false \
   -var="aws_region=eu-west-3" \
-  -var="netbox_url=${NETBOX_URL}" \
-  -var="netbox_token=${NETBOX_TOKEN}" \
   -var="router_password=${_ROUTER_PW}"
 
 cd "$SCRIPT_DIR"

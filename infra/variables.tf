@@ -16,29 +16,10 @@ variable "instance_type" {
   default     = "t3.micro"
 }
 
-variable "mcp_instance_type" {
-  description = "EC2 instance type for the MCP server"
-  type        = string
-  default     = "t3.micro"
-}
-
 variable "key_name" {
   description = "AWS EC2 key pair name"
   type        = string
   default     = "summit-demo-2026"
-}
-
-variable "netbox_url" {
-  description = "NetBox instance URL for the MCP server"
-  type        = string
-  # Passed in by setup_infra.sh from .env — no default to avoid committing instance URLs
-}
-
-variable "netbox_token" {
-  description = "NetBox API token for the MCP server (read-only)"
-  type        = string
-  sensitive   = true
-  # Passed in by setup_infra.sh from .env — never hardcode here
 }
 
 variable "router_instance_type" {
