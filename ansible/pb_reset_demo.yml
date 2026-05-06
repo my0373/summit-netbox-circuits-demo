@@ -26,10 +26,18 @@
     offline_circuits:
       - IPLC-GB-AT-SEC
       - IPLC-AR-AT-SEC
-    router_username: "{{ lookup('env', 'ANSIBLE_NET_USERNAME') | default('iosuser', true) }}"
-    router_password: "{{ lookup('env', 'ANSIBLE_NET_PASSWORD') | default(ansible_password | default(''), true) }}"
 
   tasks:
+
+    - name: Load infra vars if available (local run; AAP uses Network credential env vars)
+      ansible.builtin.include_vars:
+        file: vars/infra.yml
+      ignore_errors: true
+
+    - name: Resolve router credentials
+      ansible.builtin.set_fact:
+        router_username: "{{ lookup('env', 'ANSIBLE_NET_USERNAME') | default('iosuser', true) }}"
+        router_password: "{{ lookup('env', 'ANSIBLE_NET_PASSWORD') | default(router_password | default(''), true) }}"
 
     - name: Fetch all circuits tagged 'gb-atlanta'
       ansible.builtin.uri:

@@ -58,8 +58,4 @@ cat << NEXTSTEPS
   5. Open the incident report:
        $REPORT_URL
 
-  6. Ask Claude (via NetBox MCP):
-       "What is the current status of IPLC-GB-AT-PRI?"
-       "Which circuit is now active between GB-Bristol and US-Atlanta?"
-
 NEXTSTEPS
