@@ -79,7 +79,7 @@
 
     - name: Query active circuits at A-side site
       ansible.builtin.uri:
-        url: "{{ netbox_url }}/api/circuits/circuits/?site_id={{ a_side_site.id }}&tag=gb-atlanta&status=active"
+        url: "{{ netbox_url }}/api/circuits/circuits/?site_id={{ a_side_site.id }}&status=active&limit=100"
         headers:
           Authorization: "Token {{ netbox_token }}"
         return_content: true
@@ -88,7 +88,7 @@
 
     - name: Query active circuits at Z-side site
       ansible.builtin.uri:
-        url: "{{ netbox_url }}/api/circuits/circuits/?site_id={{ z_side_site.id }}&tag=gb-atlanta&status=active"
+        url: "{{ netbox_url }}/api/circuits/circuits/?site_id={{ z_side_site.id }}&status=active&limit=100"
         headers:
           Authorization: "Token {{ netbox_token }}"
         return_content: true
