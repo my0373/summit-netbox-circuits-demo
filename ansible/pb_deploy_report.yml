@@ -200,6 +200,7 @@
         candidates: "{{ backup_candidates }}"
         primary_gw: "{{ primary_gw }}"
         backup_gw: "{{ backup_gw }}"
+        netbox_base_url: "{{ netbox_url }}"
 
     - name: Report generated
       ansible.builtin.debug:
